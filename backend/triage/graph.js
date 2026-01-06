@@ -896,16 +896,251 @@
 
 
 //Guard rails Sentinel Layer
+// const { findDoctors } = require("./searchTools"); 
+// const { StateGraph, END } = require("@langchain/langgraph");
+// const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
+// const { ChatOllama } = require("@langchain/ollama");
+// const { HumanMessage, SystemMessage } = require("@langchain/core/messages");
+// const dotenv = require("dotenv");
+
+// dotenv.config();
+
+// // 1. DYNAMIC MODEL SWITCHER
+// let model;
+// let jsonModel;
+
+// if (process.env.LLM_MODE === "LOCAL") {
+//   console.log("💻 MODE: Local CPU (Ollama/Llama3)");
+//   model = new ChatOllama({
+//     model: "llama3", 
+//     temperature: 0, 
+//     baseUrl: "http://localhost:11434",
+//   });
+//   jsonModel = new ChatOllama({
+//     model: "llama3",
+//     temperature: 0,
+//     format: "json", 
+//     baseUrl: "http://localhost:11434",
+//   });
+// } else {
+//   console.log("🌐 MODE: Production (Gemini)");
+//   model = new ChatGoogleGenerativeAI({
+//     model: "gemini-pro", 
+//     temperature: 0,
+//     apiKey: process.env.GEMINI_API_KEY,
+//   });
+//   jsonModel = model; 
+// }
+
+// // 2. DEFINE STATE
+// const graphState = {
+//   messages: { value: (x, y) => x.concat(y), default: () => [] },
+//   symptom: { value: (x, y) => y ?? x, default: () => null },
+//   severity: { value: (x, y) => y ?? x, default: () => null },
+//   duration: { value: (x, y) => y ?? x, default: () => null },
+//   location: { value: (x, y) => y ?? x, default: () => null },
+//   intent: { value: (x, y) => y ?? x, default: () => "chat" }, 
+//   topic: { value: (x, y) => y ?? x, default: () => null },
+//   mode: { value: (x, y) => y ?? x, default: () => "intake" } 
+// };
+
+// // --- NODE 0: THE HYBRID ROUTER ---
+// async function masterRouter(state) {
+//   const lastMessage = state.messages[state.messages.length - 1].content.toLowerCase();
+//   console.log("🚦 ROUTER: Analyzing ->", lastMessage);
+
+//   // 1. 🛡️ HARD SENTINEL (Only Unambiguous Threats)
+//   // Removed "hurt myself" to avoid false positives.
+//   const strictCrisisKeywords = [
+//     "suicide", "kill myself", "want to die", "better off dead", "end my life"
+//   ];
+  
+//   if (strictCrisisKeywords.some(phrase => lastMessage.includes(phrase))) {
+//     console.log("🚨 HARD SENTINEL: Immediate Crisis Detected");
+//     return { intent: "crisis" };
+//   }
+
+//   // 2. RESET
+//   if (lastMessage.includes("reset") || lastMessage.includes("new chat")) {
+//     return { intent: "reset", symptom: null, location: null, severity: null, duration: null, mode: "intake" };
+//   }
+
+//   // 3. LOCK CHECKS
+//   if (state.mode === "locked") return { intent: "chat" };
+//   if (state.symptom && state.location && state.severity && state.duration) return { intent: "chat" };
+
+//   // 4. SMART AI ROUTER (Handles the nuance)
+//   const routerPrompt = `
+//     Classify the User Input.
+//     INPUT: "${lastMessage}"
+    
+//     INTENTS:
+//     1. "triage": Physical accident, injury, sickness (e.g. "I fell and hurt myself", "headache").
+//     2. "support": Emotional distress, periods, miscarriage.
+//     3. "crisis": Intentional SELF-HARM or danger (e.g. "I want to hurt myself", "I am cutting myself").
+//     4. "chat": General questions.
+
+//     CRITICAL RULE:
+//     - "I fell and hurt myself" -> TRIAGE (Accident).
+//     - "I want to hurt myself" -> CRISIS (Self-harm).
+
+//     OUTPUT JSON: { "intent": "triage" } OR { "intent": "support", "topic": "..." } OR { "intent": "crisis" } OR { "intent": "chat" }
+//   `;
+
+//   try {
+//     const result = await jsonModel.invoke([new HumanMessage(routerPrompt)]);
+//     const parsed = JSON.parse(result.content);
+//     console.log("🔀 AI DECISION:", parsed.intent.toUpperCase());
+//     return { intent: parsed.intent, topic: parsed.topic };
+//   } catch (e) {
+//     return { intent: "chat" };
+//   }
+// }
+
+// // --- CRISIS NODE ---
+// async function handleCrisis(state) {
+//   console.log("🚨 ACTIVATING SAFETY PROTOCOL");
+//   const safetyMessage = `
+// **⚠️ YOU ARE IMPORTANT.**
+
+// I am an AI, and I cannot provide emergency care, but help is available.
+
+// 📞 **Suicide Prevention:** 9152987821
+// 📞 **Vandrevala Foundation:** 1860 266 2345
+// 🚑 **Emergency:** 112
+
+// Please go to the nearest hospital immediately.
+//   `;
+//   return { messages: [new SystemMessage(safetyMessage)], mode: "locked" };
+// }
+
+// // --- BRANCH A: MEDICAL TRIAGE ---
+// async function extractMedicalData(state) {
+//   const lastMessage = state.messages[state.messages.length - 1].content;
+//   console.log("🕵️‍♂️ EXTRACTING DATA...");
+
+//   const prompt = `
+//     User Input: "${lastMessage}"
+//     Current Data: ${JSON.stringify({symptom: state.symptom, severity: state.severity, duration: state.duration, location: state.location})}
+//     Task: Update fields. Return JSON. Schema: {"symptom": string|null, "severity": string|null, "duration": string|null, "location": string|null}
+//   `;
+  
+//   try {
+//     const res = await jsonModel.invoke([new HumanMessage(prompt)]);
+//     const data = JSON.parse(res.content);
+//     const s = (v) => (v && !v.toLowerCase().includes("unknown") ? v : null);
+//     return { 
+//       symptom: s(data.symptom) || state.symptom,
+//       severity: s(data.severity) || state.severity,
+//       duration: s(data.duration) || state.duration,
+//       location: s(data.location) || state.location
+//     };
+//   } catch (e) { return {}; }
+// }
+
+// function checkTriageCompleteness(state) {
+//   if (!state.symptom) return "ask_symptom";
+//   if (!state.location) return "ask_location";
+//   if (!state.severity) return "ask_severity";
+//   if (!state.duration) return "ask_duration";
+//   return "generate_diagnosis";
+// }
+
+// async function askSymptom() { return { messages: [new SystemMessage("What is your main physical symptom?")] }; }
+// async function askLocation(state) { return { messages: [new SystemMessage(`Where is the ${state.symptom} located?`)] }; }
+// async function askSeverity() { return { messages: [new SystemMessage("On a scale of 1-10, how severe is it?")] }; }
+// async function askDuration() { return { messages: [new SystemMessage("How long have you had it?")] }; }
+
+// async function generateDiagnosis(state) {
+//   console.log("🏥 GENERATING DIAGNOSIS...");
+//   const prompt = `
+//     Patient: Symptom ${state.symptom}, Location ${state.location}, Severity ${state.severity}, Duration ${state.duration}.
+//     1. Brief Diagnosis. 2. Remedies. 3. End with "SPECIALIST_TYPE: <Type>"
+//   `;
+//   try {
+//     const res = await model.invoke([new HumanMessage(prompt)]);
+//     let text = res.content;
+//     let specialist = "General Physician";
+//     const match = text.match(/SPECIALIST_TYPE:\s*(.*)/i);
+//     if (match && match[1]) specialist = match[1].trim();
+//     text = text.replace(/SPECIALIST_TYPE:.*$/i, "").trim();
+//     const places = await findDoctors(specialist, "Chennai");
+//     return { messages: [new SystemMessage(`${text}\n\n----------------\n📍 **Recommended Specialists:**\n${places}`)], mode: "locked" };
+//   } catch (err) {
+//     return { messages: [new SystemMessage("Diagnosis timed out. Try again.")] };
+//   }
+// }
+
+// // --- BRANCH B: SUPPORT ---
+// async function provideSupport(state) {
+//   console.log("❤️ SUPPORT MODE");
+//   const lastMessage = state.messages[state.messages.length - 1].content;
+//   const prompt = `User Input: "${lastMessage}". Topic: "${state.topic}". Validate feelings & provide comfort. Do not diagnose.`;
+//   const res = await model.invoke([new HumanMessage(prompt)]);
+//   return { messages: [res], mode: "locked" };
+// }
+
+// // --- BRANCH C: LOCKED CHAT ---
+// async function handleChat(state) {
+//   console.log("💬 CHAT MODE");
+//   const lastMessage = state.messages[state.messages.length - 1].content;
+//   const recentHistory = state.messages.slice(-5).map(m => `${m.constructor.name === "HumanMessage" ? "User" : "AI"}: ${m.content}`).join("\n");
+
+//   const prompt = `
+//     CONTEXT: Medical Chart: ${state.symptom ? `${state.symptom} in ${state.location}` : state.topic} | Severity: ${state.severity || "N/A"}
+//     CHAT HISTORY: ${recentHistory}
+//     CURRENT QUESTION: "${lastMessage}"
+//     INSTRUCTIONS: Answer using Context/History. If NEW symptom mentioned, Refuse politely.
+//   `;
+//   const res = await model.invoke([new HumanMessage(prompt)]);
+//   return { messages: [res] };
+// }
+
+// // --- BUILD GRAPH ---
+// const workflow = new StateGraph({ channels: graphState })
+//   .addNode("router", masterRouter)
+//   .addNode("extract_medical", extractMedicalData)
+//   .addNode("ask_symptom", askSymptom)
+//   .addNode("ask_location", askLocation)
+//   .addNode("ask_severity", askSeverity)
+//   .addNode("ask_duration", askDuration)
+//   .addNode("diagnosis", generateDiagnosis)
+//   .addNode("support", provideSupport)
+//   .addNode("chat", handleChat)
+//   .addNode("crisis", handleCrisis)
+
+//   .setEntryPoint("router")
+
+//   .addConditionalEdges("router", (state) => state.intent, {
+//     triage: "extract_medical", 
+//     support: "support", 
+//     chat: "chat", 
+//     crisis: "crisis", 
+//     reset: END
+//   })
+//   .addConditionalEdges("extract_medical", checkTriageCompleteness, {
+//     ask_symptom: "ask_symptom", ask_location: "ask_location", ask_severity: "ask_severity", ask_duration: "ask_duration", generate_diagnosis: "diagnosis"
+//   })
+//   .addEdge("ask_symptom", END).addEdge("ask_location", END).addEdge("ask_severity", END)
+//   .addEdge("ask_duration", END).addEdge("diagnosis", END).addEdge("support", END)
+//   .addEdge("chat", END).addEdge("crisis", END);
+
+// const triageGraph = workflow.compile();
+// module.exports = { triageGraph };
+
+
+//added logger
 const { findDoctors } = require("./searchTools"); 
 const { StateGraph, END } = require("@langchain/langgraph");
 const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
 const { ChatOllama } = require("@langchain/ollama");
 const { HumanMessage, SystemMessage } = require("@langchain/core/messages");
 const dotenv = require("dotenv");
+const { logTransaction } = require("../utils/logger"); // 👈 LOGGER IMPORTED
 
 dotenv.config();
 
-// 1. DYNAMIC MODEL SWITCHER
+// --- 1. MODEL SETUP ---
 let model;
 let jsonModel;
 
@@ -919,7 +1154,7 @@ if (process.env.LLM_MODE === "LOCAL") {
   jsonModel = new ChatOllama({
     model: "llama3",
     temperature: 0,
-    format: "json", 
+    format: "json", // Strict JSON mode
     baseUrl: "http://localhost:11434",
   });
 } else {
@@ -932,7 +1167,7 @@ if (process.env.LLM_MODE === "LOCAL") {
   jsonModel = model; 
 }
 
-// 2. DEFINE STATE
+// --- 2. STATE DEFINITION ---
 const graphState = {
   messages: { value: (x, y) => x.concat(y), default: () => [] },
   symptom: { value: (x, y) => y ?? x, default: () => null },
@@ -944,19 +1179,20 @@ const graphState = {
   mode: { value: (x, y) => y ?? x, default: () => "intake" } 
 };
 
-// --- NODE 0: THE HYBRID ROUTER ---
+// Helper for User ID (Hardcoded for prototype)
+function getUserId(state) { return "u1@gmail.com"; }
+
+// --- NODE 0: MASTER ROUTER (Logged) ---
 async function masterRouter(state) {
+  const start = Date.now();
   const lastMessage = state.messages[state.messages.length - 1].content.toLowerCase();
   console.log("🚦 ROUTER: Analyzing ->", lastMessage);
 
-  // 1. 🛡️ HARD SENTINEL (Only Unambiguous Threats)
-  // Removed "hurt myself" to avoid false positives.
-  const strictCrisisKeywords = [
-    "suicide", "kill myself", "want to die", "better off dead", "end my life"
-  ];
-  
+  // 1. HARD SENTINEL
+  const strictCrisisKeywords = ["suicide", "kill myself", "want to die", "better off dead", "end my life"];
   if (strictCrisisKeywords.some(phrase => lastMessage.includes(phrase))) {
-    console.log("🚨 HARD SENTINEL: Immediate Crisis Detected");
+    console.log("🚨 SENTINEL: Crisis Detected");
+    logTransaction("ROUTER_SENTINEL", getUserId(state), { text: lastMessage }, { decision: "CRISIS" }, start);
     return { intent: "crisis" };
   }
 
@@ -969,53 +1205,47 @@ async function masterRouter(state) {
   if (state.mode === "locked") return { intent: "chat" };
   if (state.symptom && state.location && state.severity && state.duration) return { intent: "chat" };
 
-  // 4. SMART AI ROUTER (Handles the nuance)
+  // 4. AI ROUTER
   const routerPrompt = `
-    Classify the User Input.
+    Classify User Input.
     INPUT: "${lastMessage}"
-    
     INTENTS:
-    1. "triage": Physical accident, injury, sickness (e.g. "I fell and hurt myself", "headache").
-    2. "support": Emotional distress, periods, miscarriage.
-    3. "crisis": Intentional SELF-HARM or danger (e.g. "I want to hurt myself", "I am cutting myself").
-    4. "chat": General questions.
-
-    CRITICAL RULE:
-    - "I fell and hurt myself" -> TRIAGE (Accident).
-    - "I want to hurt myself" -> CRISIS (Self-harm).
-
-    OUTPUT JSON: { "intent": "triage" } OR { "intent": "support", "topic": "..." } OR { "intent": "crisis" } OR { "intent": "chat" }
+    1. "triage": Physical injury/sickness (e.g. "I fell", "headache").
+    2. "support": Emotional/Hormonal (e.g. "sad", "period").
+    3. "crisis": Intentional SELF-HARM (e.g. "I want to hurt myself").
+    4. "chat": General.
+    
+    OUTPUT JSON: { "intent": "..." }
   `;
 
   try {
     const result = await jsonModel.invoke([new HumanMessage(routerPrompt)]);
     const parsed = JSON.parse(result.content);
-    console.log("🔀 AI DECISION:", parsed.intent.toUpperCase());
+    
+    // 📝 LOGGING
+    logTransaction("ROUTER_AI", getUserId(state), { input: lastMessage }, parsed, start);
+    
     return { intent: parsed.intent, topic: parsed.topic };
   } catch (e) {
     return { intent: "chat" };
   }
 }
 
-// --- CRISIS NODE ---
+// --- NODE: CRISIS HANDLER ---
 async function handleCrisis(state) {
+  const start = Date.now();
   console.log("🚨 ACTIVATING SAFETY PROTOCOL");
-  const safetyMessage = `
-**⚠️ YOU ARE IMPORTANT.**
-
-I am an AI, and I cannot provide emergency care, but help is available.
-
-📞 **Suicide Prevention:** 9152987821
-📞 **Vandrevala Foundation:** 1860 266 2345
-🚑 **Emergency:** 112
-
-Please go to the nearest hospital immediately.
-  `;
+  const safetyMessage = `**⚠️ YOU ARE IMPORTANT.**\nCall 9152987821 (Suicide Prevention) or 112 (Emergency).`;
+  
+  // 📝 LOGGING
+  logTransaction("CRISIS_NODE", getUserId(state), { status: "active" }, { response: "safety_card_shown" }, start);
+  
   return { messages: [new SystemMessage(safetyMessage)], mode: "locked" };
 }
 
-// --- BRANCH A: MEDICAL TRIAGE ---
+// --- NODE: MEDICAL EXTRACTOR (Logged) ---
 async function extractMedicalData(state) {
+  const start = Date.now();
   const lastMessage = state.messages[state.messages.length - 1].content;
   console.log("🕵️‍♂️ EXTRACTING DATA...");
 
@@ -1028,6 +1258,10 @@ async function extractMedicalData(state) {
   try {
     const res = await jsonModel.invoke([new HumanMessage(prompt)]);
     const data = JSON.parse(res.content);
+    
+    // 📝 LOGGING
+    logTransaction("EXTRACTOR", getUserId(state), { text: lastMessage }, data, start);
+
     const s = (v) => (v && !v.toLowerCase().includes("unknown") ? v : null);
     return { 
       symptom: s(data.symptom) || state.symptom,
@@ -1046,12 +1280,15 @@ function checkTriageCompleteness(state) {
   return "generate_diagnosis";
 }
 
+// Question Nodes
 async function askSymptom() { return { messages: [new SystemMessage("What is your main physical symptom?")] }; }
 async function askLocation(state) { return { messages: [new SystemMessage(`Where is the ${state.symptom} located?`)] }; }
 async function askSeverity() { return { messages: [new SystemMessage("On a scale of 1-10, how severe is it?")] }; }
 async function askDuration() { return { messages: [new SystemMessage("How long have you had it?")] }; }
 
+// --- NODE: DIAGNOSIS (Logged) ---
 async function generateDiagnosis(state) {
+  const start = Date.now();
   console.log("🏥 GENERATING DIAGNOSIS...");
   const prompt = `
     Patient: Symptom ${state.symptom}, Location ${state.location}, Severity ${state.severity}, Duration ${state.duration}.
@@ -1064,24 +1301,35 @@ async function generateDiagnosis(state) {
     const match = text.match(/SPECIALIST_TYPE:\s*(.*)/i);
     if (match && match[1]) specialist = match[1].trim();
     text = text.replace(/SPECIALIST_TYPE:.*$/i, "").trim();
+    
     const places = await findDoctors(specialist, "Chennai");
+    
+    // 📝 LOGGING
+    logTransaction("DIAGNOSIS", getUserId(state), { chart: state }, { specialist, response_len: text.length }, start);
+
     return { messages: [new SystemMessage(`${text}\n\n----------------\n📍 **Recommended Specialists:**\n${places}`)], mode: "locked" };
   } catch (err) {
     return { messages: [new SystemMessage("Diagnosis timed out. Try again.")] };
   }
 }
 
-// --- BRANCH B: SUPPORT ---
+// --- NODE: SUPPORT (Logged) ---
 async function provideSupport(state) {
+  const start = Date.now();
   console.log("❤️ SUPPORT MODE");
   const lastMessage = state.messages[state.messages.length - 1].content;
   const prompt = `User Input: "${lastMessage}". Topic: "${state.topic}". Validate feelings & provide comfort. Do not diagnose.`;
   const res = await model.invoke([new HumanMessage(prompt)]);
+  
+  // 📝 LOGGING
+  logTransaction("SUPPORT_AI", getUserId(state), { topic: state.topic }, { response_len: res.content.length }, start);
+  
   return { messages: [res], mode: "locked" };
 }
 
-// --- BRANCH C: LOCKED CHAT ---
+// --- NODE: CHAT (Logged + History) ---
 async function handleChat(state) {
+  const start = Date.now();
   console.log("💬 CHAT MODE");
   const lastMessage = state.messages[state.messages.length - 1].content;
   const recentHistory = state.messages.slice(-5).map(m => `${m.constructor.name === "HumanMessage" ? "User" : "AI"}: ${m.content}`).join("\n");
@@ -1093,6 +1341,10 @@ async function handleChat(state) {
     INSTRUCTIONS: Answer using Context/History. If NEW symptom mentioned, Refuse politely.
   `;
   const res = await model.invoke([new HumanMessage(prompt)]);
+  
+  // 📝 LOGGING
+  logTransaction("CHAT_BOT", getUserId(state), { question: lastMessage }, { response: res.content }, start);
+
   return { messages: [res] };
 }
 
@@ -1112,11 +1364,7 @@ const workflow = new StateGraph({ channels: graphState })
   .setEntryPoint("router")
 
   .addConditionalEdges("router", (state) => state.intent, {
-    triage: "extract_medical", 
-    support: "support", 
-    chat: "chat", 
-    crisis: "crisis", 
-    reset: END
+    triage: "extract_medical", support: "support", chat: "chat", crisis: "crisis", reset: END
   })
   .addConditionalEdges("extract_medical", checkTriageCompleteness, {
     ask_symptom: "ask_symptom", ask_location: "ask_location", ask_severity: "ask_severity", ask_duration: "ask_duration", generate_diagnosis: "diagnosis"

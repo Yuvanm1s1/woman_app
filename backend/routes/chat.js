@@ -230,12 +230,125 @@
 
 
 
+// const express = require('express');
+// const router = express.Router();
+// const Chat = require('../models/Chat');
+// const auth = require('../middleware/authMiddleware');
+// const { HumanMessage, AIMessage } = require('@langchain/core/messages');
+// const { triageGraph } = require('../triage/graph'); 
+
+// // --- FETCH HISTORY ---
+// router.get('/history', auth, async (req, res) => {
+//   try {
+//     const chats = await Chat.find({ userId: req.user.id }).sort({ updatedAt: -1 });
+//     res.json(chats);
+//   } catch (error) {
+//     res.status(500).json({ error: "Failed to fetch history" });
+//   }
+// });
+
+// // --- FETCH SINGLE CHAT ---
+// router.get('/:id', auth, async (req, res) => {
+//   try {
+//     const chat = await Chat.findOne({ _id: req.params.id, userId: req.user.id });
+//     if (!chat) return res.status(404).json({ msg: "Chat not found" });
+//     res.json(chat);
+//   } catch (error) {
+//     res.status(500).json({ error: "Failed to fetch chat" });
+//   }
+// });
+
+// // --- SMART SEND ROUTE ---
+// router.post('/send', auth, async (req, res) => {
+//   const userId = req.user.id; 
+//   const { prompt, chatId } = req.body; 
+
+//   console.log(`📨 REQ: "${prompt}" | ChatID: ${chatId || "NEW"}`);
+
+//   try {
+//     let chatRecord;
+//     if (chatId) chatRecord = await Chat.findOne({ _id: chatId, userId });
+//     if (!chatRecord) chatRecord = new Chat({ userId, messages: [] });
+
+//     // 1. Setup Messages
+//     const history = chatRecord.messages.map(m => 
+//       m.role === "user" ? new HumanMessage(m.parts[0].text) : new AIMessage(m.parts[0].text)
+//     );
+//     const inputMessages = [...history, new HumanMessage(prompt)];
+
+//     // 2. Load "Clipboard" from DB
+//     const startState = {
+//       messages: inputMessages,
+//       symptom: chatRecord.symptom || null,
+//       severity: chatRecord.severity || null,
+//       duration: chatRecord.duration || null,
+//       location: chatRecord.location || null,
+//     };
+
+//     // DEBUG LOG: Prove that we remembered the symptom
+//     console.log("🔍 LOADED STATE FROM DB:", { 
+//       symptom: startState.symptom, 
+//       location: startState.location 
+//     });
+
+//     // 3. Run Graph
+//     const finalState = await triageGraph.invoke(startState);
+//     const botResponseText = finalState.messages[finalState.messages.length - 1].content;
+
+//     // 4. Save Updates
+//     chatRecord.messages.push({ role: "user", parts: [{ text: prompt }] });
+//     chatRecord.messages.push({ role: "model", parts: [{ text: botResponseText }] });
+    
+//     // CRITICAL: Save the memory fields
+//     chatRecord.symptom = finalState.symptom;
+//     chatRecord.severity = finalState.severity;
+//     chatRecord.duration = finalState.duration;
+//     chatRecord.location = finalState.location;
+
+//     await chatRecord.save();
+
+//     res.json({ answer: botResponseText, chatId: chatRecord._id });
+
+//   } catch (error) {
+//     console.error("❌ ROUTE ERROR:", error);
+//     res.status(500).json({ error: "Failed to process message" });
+//   }
+// });
+
+// // --- DELETE A CHAT ---
+// router.delete('/:id', auth, async (req, res) => {
+//   try {
+//     // 1. Find and Delete the chat (Security: Ensure it belongs to the user)
+//     const result = await Chat.findOneAndDelete({ 
+//       _id: req.params.id, 
+//       userId: req.user.id 
+//     });
+
+//     if (!result) {
+//       return res.status(404).json({ msg: "Chat not found or unauthorized" });
+//     }
+
+//     res.json({ msg: "Chat deleted successfully" });
+//   } catch (error) {
+//     console.error("Delete Error:", error);
+//     res.status(500).json({ error: "Server Error" });
+//   }
+// });
+
+
+// module.exports = router;
+
+
+
+
+//safety lock
 const express = require('express');
 const router = express.Router();
 const Chat = require('../models/Chat');
 const auth = require('../middleware/authMiddleware');
 const { HumanMessage, AIMessage } = require('@langchain/core/messages');
 const { triageGraph } = require('../triage/graph'); 
+const { logTransaction } = require('../utils/logger'); // Import logger for errors
 
 // --- FETCH HISTORY ---
 router.get('/history', auth, async (req, res) => {
@@ -260,50 +373,48 @@ router.get('/:id', auth, async (req, res) => {
 
 // --- SMART SEND ROUTE ---
 router.post('/send', auth, async (req, res) => {
+  const start = Date.now();
   const userId = req.user.id; 
   const { prompt, chatId } = req.body; 
 
   console.log(`📨 REQ: "${prompt}" | ChatID: ${chatId || "NEW"}`);
 
   try {
+    // 1. Load Chat
     let chatRecord;
     if (chatId) chatRecord = await Chat.findOne({ _id: chatId, userId });
     if (!chatRecord) chatRecord = new Chat({ userId, messages: [] });
 
-    // 1. Setup Messages
+    // 2. Setup Messages
     const history = chatRecord.messages.map(m => 
       m.role === "user" ? new HumanMessage(m.parts[0].text) : new AIMessage(m.parts[0].text)
     );
     const inputMessages = [...history, new HumanMessage(prompt)];
 
-    // 2. Load "Clipboard" from DB
+    // 3. Load State (Including MODE)
     const startState = {
       messages: inputMessages,
       symptom: chatRecord.symptom || null,
       severity: chatRecord.severity || null,
       duration: chatRecord.duration || null,
       location: chatRecord.location || null,
+      mode: chatRecord.mode || "intake" // <--- CRITICAL: Load the lock state
     };
 
-    // DEBUG LOG: Prove that we remembered the symptom
-    console.log("🔍 LOADED STATE FROM DB:", { 
-      symptom: startState.symptom, 
-      location: startState.location 
-    });
-
-    // 3. Run Graph
+    // 4. Run Graph
     const finalState = await triageGraph.invoke(startState);
     const botResponseText = finalState.messages[finalState.messages.length - 1].content;
 
-    // 4. Save Updates
+    // 5. Save Updates
     chatRecord.messages.push({ role: "user", parts: [{ text: prompt }] });
     chatRecord.messages.push({ role: "model", parts: [{ text: botResponseText }] });
     
-    // CRITICAL: Save the memory fields
+    // Save Context & Lock
     chatRecord.symptom = finalState.symptom;
     chatRecord.severity = finalState.severity;
     chatRecord.duration = finalState.duration;
     chatRecord.location = finalState.location;
+    chatRecord.mode = finalState.mode; // <--- CRITICAL: Save the lock state
 
     await chatRecord.save();
 
@@ -311,29 +422,21 @@ router.post('/send', auth, async (req, res) => {
 
   } catch (error) {
     console.error("❌ ROUTE ERROR:", error);
+    // Log system errors to file too
+    logTransaction("API_ERROR", userId, { input: prompt }, { error: error.message }, start);
     res.status(500).json({ error: "Failed to process message" });
   }
 });
 
-// --- DELETE A CHAT ---
+// --- DELETE CHAT ---
 router.delete('/:id', auth, async (req, res) => {
   try {
-    // 1. Find and Delete the chat (Security: Ensure it belongs to the user)
-    const result = await Chat.findOneAndDelete({ 
-      _id: req.params.id, 
-      userId: req.user.id 
-    });
-
-    if (!result) {
-      return res.status(404).json({ msg: "Chat not found or unauthorized" });
-    }
-
-    res.json({ msg: "Chat deleted successfully" });
+    const result = await Chat.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
+    if (!result) return res.status(404).json({ msg: "Chat not found" });
+    res.json({ msg: "Chat deleted" });
   } catch (error) {
-    console.error("Delete Error:", error);
     res.status(500).json({ error: "Server Error" });
   }
 });
-
 
 module.exports = router;
