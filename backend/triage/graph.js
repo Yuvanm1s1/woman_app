@@ -1380,6 +1380,289 @@
 
 
 //id+short term memory
+// const { findDoctors } = require("./searchTools"); 
+// const { StateGraph, END } = require("@langchain/langgraph");
+// const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
+// const { ChatOllama } = require("@langchain/ollama");
+// const { HumanMessage, SystemMessage } = require("@langchain/core/messages");
+// const dotenv = require("dotenv");
+// const { logTransaction } = require("../utils/logger"); 
+
+// dotenv.config();
+
+// // --- 1. MODEL SETUP ---
+// let model;
+// let jsonModel;
+
+// if (process.env.LLM_MODE === "LOCAL") {
+//   console.log("💻 MODE: Local CPU (Ollama/Llama3)");
+//   model = new ChatOllama({
+//     model: "llama3", 
+//     temperature: 0, 
+//     baseUrl: "http://localhost:11434",
+//   });
+//   jsonModel = new ChatOllama({
+//     model: "llama3",
+//     temperature: 0,
+//     format: "json", // Strict JSON mode
+//     baseUrl: "http://localhost:11434",
+//   });
+// } else {
+//   console.log("🌐 MODE: Production (Gemini)");
+//   model = new ChatGoogleGenerativeAI({
+//     model: "gemini-pro", 
+//     temperature: 0,
+//     apiKey: process.env.GEMINI_API_KEY,
+//   });
+//   jsonModel = model; 
+// }
+
+// // --- 2. STATE DEFINITION ---
+// const graphState = {
+//   messages: { value: (x, y) => x.concat(y), default: () => [] },
+//   symptom: { value: (x, y) => y ?? x, default: () => null },
+//   severity: { value: (x, y) => y ?? x, default: () => null },
+//   duration: { value: (x, y) => y ?? x, default: () => null },
+//   location: { value: (x, y) => y ?? x, default: () => null },
+//   intent: { value: (x, y) => y ?? x, default: () => "chat" }, 
+//   topic: { value: (x, y) => y ?? x, default: () => null },
+//   mode: { value: (x, y) => y ?? x, default: () => "intake" },
+//   // ✅ FIX: Added transactionId to state so it passes through nodes
+//   transactionId: { value: (x, y) => y ?? x, default: () => null } 
+// };
+
+// // Helper for User ID (Hardcoded for prototype)
+// function getUserId(state) { return "u1@gmail.com"; }
+
+// // --- NODE 0: MASTER ROUTER (With Triage Lock) ---
+// async function masterRouter(state) {
+//   const start = Date.now();
+//   const lastMessage = state.messages[state.messages.length - 1].content.toLowerCase();
+  
+//   const txnId = state.transactionId || "ROUTER_AI";
+
+//   console.log(`🚦 [${txnId}] ROUTER: Analyzing ->`, lastMessage);
+
+//   // 1. HARD SENTINEL (Safety First)
+//   const strictCrisisKeywords = ["suicide", "kill myself", "want to die", "better off dead", "end my life"];
+//   if (strictCrisisKeywords.some(phrase => lastMessage.includes(phrase))) {
+//     console.log("🚨 SENTINEL: Crisis Detected");
+//     logTransaction(txnId, "ROUTER_SENTINEL", getUserId(state), { text: lastMessage }, { decision: "CRISIS" }, start);
+//     return { intent: "crisis" };
+//   }
+
+//   // 2. RESET (Always allow user to exit)
+//   if (lastMessage.includes("reset") || lastMessage.includes("new chat")) {
+//     return { intent: "reset", symptom: null, location: null, severity: null, duration: null, mode: "intake" };
+//   }
+
+//   // 3. LOCK CHECKS (If already finished)
+//   if (state.mode === "locked") return { intent: "chat" };
+//   if (state.symptom && state.location && state.severity && state.duration) return { intent: "chat" };
+
+//   // ✅ 4. THE FIX: TRIAGE LOCK-IN
+//   // If we already have a Symptom, but are missing other details, FORCE "triage".
+//   // Do not let the AI Router guess again. 
+//   if (state.symptom && (!state.severity || !state.duration || !state.location)) {
+//      console.log(`🚑 [${txnId}] TRIAGE LOCK: In middle of intake. Bypassing Router.`);
+//      return { intent: "triage" };
+//   }
+
+//   // 5. AI ROUTER (Only runs if we are starting fresh)
+//   const routerPrompt = `
+//     Classify User Input.
+//     INPUT: "${lastMessage}"
+    
+//     RULES:
+//     1. CRISIS: Self-harm, suicide -> "crisis"
+//     2. SUPPORT: Emotional words ("anxious", "depressed", "sad") -> "support"
+//     3. TRIAGE: Physical injuries, sickness -> "triage"
+//     4. CHAT: General -> "chat"
+    
+//     IMPORTANT: Return the intent key in LOWERCASE.
+//     OUTPUT JSON: { "intent": "..." }
+//   `;
+
+//   try {
+//     const result = await jsonModel.invoke([new HumanMessage(routerPrompt)]);
+//     const parsed = JSON.parse(result.content);
+//     const normalizedIntent = parsed.intent ? parsed.intent.toLowerCase() : "chat";
+    
+//     logTransaction(txnId, "ROUTER_AI", getUserId(state), { input: lastMessage }, parsed, start);
+//     return { intent: normalizedIntent, topic: parsed.topic };
+//   } catch (e) {
+//     logTransaction(txnId, "ROUTER_ERROR", getUserId(state), { error: e.message }, { fallback: "chat" }, start);
+//     return { intent: "chat" };
+//   }
+// }
+// // --- NODE: CRISIS HANDLER ---
+// async function handleCrisis(state) {
+//   const start = Date.now();
+//   const txnId = state.transactionId || "CRISIS_NODE";
+//   console.log("🚨 ACTIVATING SAFETY PROTOCOL");
+  
+//   const safetyMessage = `**⚠️ YOU ARE IMPORTANT.**\nCall 9152987821 (Suicide Prevention) or 112 (Emergency).`;
+  
+//   logTransaction(txnId, "CRISIS_NODE", getUserId(state), { status: "active" }, { response: "safety_card_shown" }, start);
+  
+//   return { messages: [new SystemMessage(safetyMessage)], mode: "locked" };
+// }
+
+// // --- NODE: MEDICAL EXTRACTOR (Logged) ---
+// async function extractMedicalData(state) {
+//   const start = Date.now();
+//   const lastMessage = state.messages[state.messages.length - 1].content;
+//   const txnId = state.transactionId || "EXTRACTOR";
+
+//   console.log("🕵️‍♂️ EXTRACTING DATA...");
+
+//   const prompt = `
+//     User Input: "${lastMessage}"
+//     Current Data: ${JSON.stringify({symptom: state.symptom, severity: state.severity, duration: state.duration, location: state.location})}
+//     Task: Update fields based on input. Return JSON. 
+//     Schema: {"symptom": string|null, "severity": string|null, "duration": string|null, "location": string|null}
+//   `;
+  
+//   try {
+//     const res = await jsonModel.invoke([new HumanMessage(prompt)]);
+//     const data = JSON.parse(res.content);
+    
+//     // Log with txnId
+//     logTransaction(txnId, "EXTRACTOR", getUserId(state), { text: lastMessage }, data, start);
+
+//     const s = (v) => (v && !v.toLowerCase().includes("unknown") ? v : null);
+//     return { 
+//       symptom: s(data.symptom) || state.symptom,
+//       severity: s(data.severity) || state.severity,
+//       duration: s(data.duration) || state.duration,
+//       location: s(data.location) || state.location
+//     };
+//   } catch (e) { 
+//     return {}; 
+//   }
+// }
+
+// function checkTriageCompleteness(state) {
+//   if (!state.symptom) return "ask_symptom";
+//   if (!state.location) return "ask_location";
+//   if (!state.severity) return "ask_severity";
+//   if (!state.duration) return "ask_duration";
+//   return "generate_diagnosis";
+// }
+
+// // Question Nodes
+// async function askSymptom() { return { messages: [new SystemMessage("What is your main physical symptom?")] }; }
+// async function askLocation(state) { return { messages: [new SystemMessage(`Where is the ${state.symptom} located?`)] }; }
+// async function askSeverity() { return { messages: [new SystemMessage("On a scale of 1-10, how severe is it?")] }; }
+// async function askDuration() { return { messages: [new SystemMessage("How long have you had it?")] }; }
+
+// // --- NODE: DIAGNOSIS (Logged) ---
+// async function generateDiagnosis(state) {
+//   const start = Date.now();
+//   const txnId = state.transactionId || "DIAGNOSIS";
+//   console.log("🏥 GENERATING DIAGNOSIS...");
+  
+//   const prompt = `
+//     Patient: Symptom ${state.symptom}, Location ${state.location}, Severity ${state.severity}, Duration ${state.duration}.
+//     1. Provide a Brief Diagnosis (Potential cause).
+//     2. Suggest 3 Home Remedies or Over-the-Counter (OTC) relief ONLY.
+//     3. ⛔ CRITICAL: DO NOT suggest specific prescription names or dosages.
+//     4. End with "SPECIALIST_TYPE: <Type>"
+//   `;
+  
+//   try {
+//     const res = await model.invoke([new HumanMessage(prompt)]);
+//     let text = res.content;
+//     let specialist = "General Physician";
+//     const match = text.match(/SPECIALIST_TYPE:\s*(.*)/i);
+//     if (match && match[1]) specialist = match[1].trim();
+//     text = text.replace(/SPECIALIST_TYPE:.*$/i, "").trim();
+    
+//     const places = await findDoctors(specialist, "Chennai");
+    
+//     // Log with txnId
+//     logTransaction(txnId, "DIAGNOSIS", getUserId(state), { chart: state }, { specialist, response_len: text.length }, start);
+
+//     return { messages: [new SystemMessage(`${text}\n\n----------------\n📍 **Recommended Specialists:**\n${places}`)], mode: "locked" };
+//   } catch (err) {
+//     return { messages: [new SystemMessage("Diagnosis timed out. Try again.")] };
+//   }
+// }
+
+// // --- NODE: SUPPORT (Logged) ---
+// async function provideSupport(state) {
+//   const start = Date.now();
+//   const txnId = state.transactionId || "SUPPORT_AI";
+//   console.log("❤️ SUPPORT MODE");
+  
+//   const lastMessage = state.messages[state.messages.length - 1].content;
+//   const prompt = `User Input: "${lastMessage}". Topic: "${state.topic}". Validate feelings & provide comfort. Do not diagnose.`;
+//   const res = await model.invoke([new HumanMessage(prompt)]);
+  
+//   // Log with txnId
+//   logTransaction(txnId, "SUPPORT_AI", getUserId(state), { topic: state.topic }, { response_len: res.content.length }, start);
+  
+//   return { messages: [res], mode: "locked" };
+// }
+
+// // --- NODE: CHAT (Logged + History) ---
+// async function handleChat(state) {
+//   const start = Date.now();
+//   const txnId = state.transactionId || "CHAT_BOT";
+//   console.log("💬 CHAT MODE");
+  
+//   const lastMessage = state.messages[state.messages.length - 1].content;
+//   const recentHistory = state.messages.slice(-5).map(m => `${m.constructor.name === "HumanMessage" ? "User" : "AI"}: ${m.content}`).join("\n");
+
+//   const prompt = `
+//     CONTEXT: Medical Chart: ${state.symptom ? `${state.symptom} in ${state.location}` : state.topic} | Severity: ${state.severity || "N/A"}
+//     CHAT HISTORY: ${recentHistory}
+//     CURRENT QUESTION: "${lastMessage}"
+//     INSTRUCTIONS: 
+//     1. Answer using Context/History. 
+//     2. If user asks for medication/prescription: Refuse politely. Say "I cannot prescribe medication. Please consult a doctor."
+//     3. If NEW symptom mentioned, Refuse politely.
+//   `;
+  
+//   const res = await model.invoke([new HumanMessage(prompt)]);
+  
+//   // Log with txnId
+//   logTransaction(txnId, "CHAT_BOT", getUserId(state), { question: lastMessage }, { response: res.content }, start);
+
+//   return { messages: [res] };
+// }
+
+// // --- BUILD GRAPH ---
+// const workflow = new StateGraph({ channels: graphState })
+//   .addNode("router", masterRouter)
+//   .addNode("extract_medical", extractMedicalData)
+//   .addNode("ask_symptom", askSymptom)
+//   .addNode("ask_location", askLocation)
+//   .addNode("ask_severity", askSeverity)
+//   .addNode("ask_duration", askDuration)
+//   .addNode("diagnosis", generateDiagnosis)
+//   .addNode("support", provideSupport)
+//   .addNode("chat", handleChat)
+//   .addNode("crisis", handleCrisis)
+
+//   .setEntryPoint("router")
+
+//   .addConditionalEdges("router", (state) => state.intent, {
+//     triage: "extract_medical", support: "support", chat: "chat", crisis: "crisis", reset: END
+//   })
+//   .addConditionalEdges("extract_medical", checkTriageCompleteness, {
+//     ask_symptom: "ask_symptom", ask_location: "ask_location", ask_severity: "ask_severity", ask_duration: "ask_duration", generate_diagnosis: "diagnosis"
+//   })
+//   .addEdge("ask_symptom", END).addEdge("ask_location", END).addEdge("ask_severity", END)
+//   .addEdge("ask_duration", END).addEdge("diagnosis", END).addEdge("support", END)
+//   .addEdge("chat", END).addEdge("crisis", END);
+
+// const triageGraph = workflow.compile();
+// module.exports = { triageGraph };
+
+
+
+//Rag
 const { findDoctors } = require("./searchTools"); 
 const { StateGraph, END } = require("@langchain/langgraph");
 const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
@@ -1387,6 +1670,9 @@ const { ChatOllama } = require("@langchain/ollama");
 const { HumanMessage, SystemMessage } = require("@langchain/core/messages");
 const dotenv = require("dotenv");
 const { logTransaction } = require("../utils/logger"); 
+
+// ✅ IMPORT THE NEW RAG AGENT
+const { runBreastfeedingAgent } = require("./agents/breastfeedingAgent");
 
 dotenv.config();
 
@@ -1427,14 +1713,14 @@ const graphState = {
   intent: { value: (x, y) => y ?? x, default: () => "chat" }, 
   topic: { value: (x, y) => y ?? x, default: () => null },
   mode: { value: (x, y) => y ?? x, default: () => "intake" },
-  // ✅ FIX: Added transactionId to state so it passes through nodes
+  // TransactionId passes through nodes
   transactionId: { value: (x, y) => y ?? x, default: () => null } 
 };
 
-// Helper for User ID (Hardcoded for prototype)
+// Helper for User ID
 function getUserId(state) { return "u1@gmail.com"; }
 
-// --- NODE 0: MASTER ROUTER (With Triage Lock) ---
+// --- NODE 0: MASTER ROUTER (Updated with EDUCATION intent) ---
 async function masterRouter(state) {
   const start = Date.now();
   const lastMessage = state.messages[state.messages.length - 1].content.toLowerCase();
@@ -1443,7 +1729,7 @@ async function masterRouter(state) {
 
   console.log(`🚦 [${txnId}] ROUTER: Analyzing ->`, lastMessage);
 
-  // 1. HARD SENTINEL (Safety First)
+  // 1. HARD SENTINEL
   const strictCrisisKeywords = ["suicide", "kill myself", "want to die", "better off dead", "end my life"];
   if (strictCrisisKeywords.some(phrase => lastMessage.includes(phrase))) {
     console.log("🚨 SENTINEL: Crisis Detected");
@@ -1451,33 +1737,33 @@ async function masterRouter(state) {
     return { intent: "crisis" };
   }
 
-  // 2. RESET (Always allow user to exit)
+  // 2. RESET
   if (lastMessage.includes("reset") || lastMessage.includes("new chat")) {
     return { intent: "reset", symptom: null, location: null, severity: null, duration: null, mode: "intake" };
   }
 
-  // 3. LOCK CHECKS (If already finished)
+  // 3. LOCK CHECKS
   if (state.mode === "locked") return { intent: "chat" };
   if (state.symptom && state.location && state.severity && state.duration) return { intent: "chat" };
 
-  // ✅ 4. THE FIX: TRIAGE LOCK-IN
+  // 4. TRIAGE LOCK-IN
   // If we already have a Symptom, but are missing other details, FORCE "triage".
-  // Do not let the AI Router guess again. 
   if (state.symptom && (!state.severity || !state.duration || !state.location)) {
      console.log(`🚑 [${txnId}] TRIAGE LOCK: In middle of intake. Bypassing Router.`);
      return { intent: "triage" };
   }
 
-  // 5. AI ROUTER (Only runs if we are starting fresh)
+  // 5. AI ROUTER (Updated Prompt)
   const routerPrompt = `
     Classify User Input.
     INPUT: "${lastMessage}"
     
     RULES:
     1. CRISIS: Self-harm, suicide -> "crisis"
-    2. SUPPORT: Emotional words ("anxious", "depressed", "sad") -> "support"
-    3. TRIAGE: Physical injuries, sickness -> "triage"
-    4. CHAT: General -> "chat"
+    2. EDUCATION: Questions about breastfeeding, milk supply, latching, WHO guidelines, or baby care -> "education"
+    3. SUPPORT: Emotional words ("anxious", "depressed", "sad") -> "support"
+    4. TRIAGE: Physical injuries, sickness -> "triage"
+    5. CHAT: General -> "chat"
     
     IMPORTANT: Return the intent key in LOWERCASE.
     OUTPUT JSON: { "intent": "..." }
@@ -1495,6 +1781,7 @@ async function masterRouter(state) {
     return { intent: "chat" };
   }
 }
+
 // --- NODE: CRISIS HANDLER ---
 async function handleCrisis(state) {
   const start = Date.now();
@@ -1508,7 +1795,7 @@ async function handleCrisis(state) {
   return { messages: [new SystemMessage(safetyMessage)], mode: "locked" };
 }
 
-// --- NODE: MEDICAL EXTRACTOR (Logged) ---
+// --- NODE: MEDICAL EXTRACTOR ---
 async function extractMedicalData(state) {
   const start = Date.now();
   const lastMessage = state.messages[state.messages.length - 1].content;
@@ -1527,7 +1814,6 @@ async function extractMedicalData(state) {
     const res = await jsonModel.invoke([new HumanMessage(prompt)]);
     const data = JSON.parse(res.content);
     
-    // Log with txnId
     logTransaction(txnId, "EXTRACTOR", getUserId(state), { text: lastMessage }, data, start);
 
     const s = (v) => (v && !v.toLowerCase().includes("unknown") ? v : null);
@@ -1556,7 +1842,7 @@ async function askLocation(state) { return { messages: [new SystemMessage(`Where
 async function askSeverity() { return { messages: [new SystemMessage("On a scale of 1-10, how severe is it?")] }; }
 async function askDuration() { return { messages: [new SystemMessage("How long have you had it?")] }; }
 
-// --- NODE: DIAGNOSIS (Logged) ---
+// --- NODE: DIAGNOSIS ---
 async function generateDiagnosis(state) {
   const start = Date.now();
   const txnId = state.transactionId || "DIAGNOSIS";
@@ -1580,7 +1866,6 @@ async function generateDiagnosis(state) {
     
     const places = await findDoctors(specialist, "Chennai");
     
-    // Log with txnId
     logTransaction(txnId, "DIAGNOSIS", getUserId(state), { chart: state }, { specialist, response_len: text.length }, start);
 
     return { messages: [new SystemMessage(`${text}\n\n----------------\n📍 **Recommended Specialists:**\n${places}`)], mode: "locked" };
@@ -1589,7 +1874,7 @@ async function generateDiagnosis(state) {
   }
 }
 
-// --- NODE: SUPPORT (Logged) ---
+// --- NODE: SUPPORT ---
 async function provideSupport(state) {
   const start = Date.now();
   const txnId = state.transactionId || "SUPPORT_AI";
@@ -1599,13 +1884,12 @@ async function provideSupport(state) {
   const prompt = `User Input: "${lastMessage}". Topic: "${state.topic}". Validate feelings & provide comfort. Do not diagnose.`;
   const res = await model.invoke([new HumanMessage(prompt)]);
   
-  // Log with txnId
   logTransaction(txnId, "SUPPORT_AI", getUserId(state), { topic: state.topic }, { response_len: res.content.length }, start);
   
   return { messages: [res], mode: "locked" };
 }
 
-// --- NODE: CHAT (Logged + History) ---
+// --- NODE: CHAT ---
 async function handleChat(state) {
   const start = Date.now();
   const txnId = state.transactionId || "CHAT_BOT";
@@ -1626,10 +1910,14 @@ async function handleChat(state) {
   
   const res = await model.invoke([new HumanMessage(prompt)]);
   
-  // Log with txnId
   logTransaction(txnId, "CHAT_BOT", getUserId(state), { question: lastMessage }, { response: res.content }, start);
 
   return { messages: [res] };
+}
+
+// ✅ WRAPPER FOR THE BREASTFEEDING AGENT
+async function callBreastfeedingAgent(state) {
+  return await runBreastfeedingAgent(state, model);
 }
 
 // --- BUILD GRAPH ---
@@ -1644,18 +1932,28 @@ const workflow = new StateGraph({ channels: graphState })
   .addNode("support", provideSupport)
   .addNode("chat", handleChat)
   .addNode("crisis", handleCrisis)
+  
+  // ✅ REGISTER THE NEW NODE
+  .addNode("breastfeeding", callBreastfeedingAgent)
 
   .setEntryPoint("router")
 
   .addConditionalEdges("router", (state) => state.intent, {
-    triage: "extract_medical", support: "support", chat: "chat", crisis: "crisis", reset: END
+    triage: "extract_medical", 
+    support: "support", 
+    chat: "chat", 
+    crisis: "crisis", 
+    education: "breastfeeding", // 👈 NEW ROUTE
+    reset: END
   })
   .addConditionalEdges("extract_medical", checkTriageCompleteness, {
     ask_symptom: "ask_symptom", ask_location: "ask_location", ask_severity: "ask_severity", ask_duration: "ask_duration", generate_diagnosis: "diagnosis"
   })
   .addEdge("ask_symptom", END).addEdge("ask_location", END).addEdge("ask_severity", END)
   .addEdge("ask_duration", END).addEdge("diagnosis", END).addEdge("support", END)
-  .addEdge("chat", END).addEdge("crisis", END);
+  .addEdge("chat", END).addEdge("crisis", END)
+  // ✅ CLOSE THE LOOP
+  .addEdge("breastfeeding", END);
 
 const triageGraph = workflow.compile();
 module.exports = { triageGraph };
