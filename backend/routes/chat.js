@@ -589,164 +589,16 @@
 // routes/chat.js
 
 // UUID and Short Term Memory
-const { v4: uuidv4 } = require('uuid');
-const express = require('express');
-const router = express.Router();
-const Chat = require('../models/Chat');
-const auth = require('../middleware/authMiddleware');
-const { HumanMessage, AIMessage } = require('@langchain/core/messages');
-const { triageGraph } = require('../triage/graph'); 
-const { logTransaction } = require('../utils/logger'); 
-
-// --- 1. FETCH HISTORY ---
-router.get('/history', auth, async (req, res) => {
-  try {
-    const chats = await Chat.find({ userId: req.user.id }).sort({ updatedAt: -1 });
-    res.json(chats);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch history" });
-  }
-});
-
-// --- 2. FETCH SINGLE CHAT ---
-router.get('/:id', auth, async (req, res) => {
-  try {
-    const chat = await Chat.findOne({ _id: req.params.id, userId: req.user.id });
-    if (!chat) return res.status(404).json({ msg: "Chat not found" });
-    res.json(chat);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch chat" });
-  }
-});
-
-// --- 3. SMART SEND ROUTE (SECURE) ---
-router.post('/send', auth, async (req, res) => {
-  const start = Date.now();
-  const userId = req.user.id; 
-  const { prompt, chatId } = req.body; 
-
-  // Generate Transaction ID
-  const transactionId = uuidv4();
-
-  // 🔒 Log securely (Hide raw input to prevent PII leak in console)
-  console.log(`📨 [${transactionId}] REQ: (Processing Input...)`);
-
-  try {
-    // A. Retrieve or Create Chat
-    let chatRecord;
-    if (chatId) chatRecord = await Chat.findOne({ _id: chatId, userId });
-    if (!chatRecord) chatRecord = new Chat({ userId, messages: [] });
-
-    // B. Short-Term Memory Slice (Context Window)
-    const MEMORY_WINDOW = 10;
-    const recentMessages = chatRecord.messages.slice(-MEMORY_WINDOW);
-    
-    // Convert DB messages to LangChain format
-    const history = recentMessages.map(m => 
-      m.role === "user" ? new HumanMessage(m.parts[0].text) : new AIMessage(m.parts[0].text)
-    );
-    
-    // Add current raw prompt to the inputs for the Graph
-    const inputMessages = [...history, new HumanMessage(prompt)];
-
-    const startState = {
-      messages: inputMessages,
-      symptom: chatRecord.symptom || null,
-      severity: chatRecord.severity || null,
-      duration: chatRecord.duration || null,
-      location: chatRecord.location || null,
-      mode: chatRecord.mode || "intake",
-      transactionId: transactionId,
-      user_language: chatRecord.user_language || "english" // Persist language if saved
-    };
-
-    // C. RUN THE GRAPH (Guardrails & Agents)
-    const finalState = await triageGraph.invoke(startState);
-
-    // --- 🚨 SECURITY FIX START 🚨 ---
-    // Instead of saving the raw 'prompt', we extract the processed text from the Graph.
-    // The Guardrail Node has likely updated the HumanMessage to replace PII.
-    
-    const botResponseText = finalState.messages[finalState.messages.length - 1].content;
-    
-    // Find the most recent Human Message in the final state
-    const allMessages = finalState.messages;
-    const lastHumanMessage = allMessages.slice().reverse().find(m => m._getType() === "human");
-    
-    // If the Guardrail scrubbed it, this will be "[PHONE_REDACTED]".
-    const scrubbedPrompt = lastHumanMessage ? lastHumanMessage.content : prompt;
-    // --- 🚨 SECURITY FIX END 🚨 ---
-
-    // D. SAVE TO DATABASE (Using Clean Data)
-    chatRecord.messages.push({ 
-        role: "user", 
-        parts: [{ text: scrubbedPrompt }], // ✅ Saved as Safe Text
-        transactionId: transactionId 
-    });
-    
-    chatRecord.messages.push({ 
-        role: "model", 
-        parts: [{ text: botResponseText }],
-        transactionId: transactionId 
-    });
-    
-    // Update State Fields
-    chatRecord.symptom = finalState.symptom;
-    chatRecord.severity = finalState.severity;
-    chatRecord.duration = finalState.duration;
-    chatRecord.location = finalState.location;
-    chatRecord.mode = finalState.mode;
-    
-    // Optional: Save detected language if you added it to schema
-    if (finalState.user_language) chatRecord.user_language = finalState.user_language; 
-
-    await chatRecord.save();
-
-    // E. LOG TRANSACTION (Using Clean Data)
-    logTransaction(
-        transactionId, 
-        "FINAL_RESPONSE", 
-        userId, 
-        { prompt: scrubbedPrompt }, // ✅ Logged as Safe Text
-        { response: botResponseText }, 
-        start
-    );
-
-    res.json({ answer: botResponseText, chatId: chatRecord._id });
-
-  } catch (error) {
-    console.error(`❌ [${transactionId}] ERROR:`, error);
-    // Log error but avoid logging raw prompt if possible
-    logTransaction(transactionId, "API_ERROR", userId, { input: "Error processing input" }, { error: error.message }, start);
-    res.status(500).json({ error: "Failed to process message" });
-  }
-});
-
-// --- 4. DELETE CHAT ---
-router.delete('/:id', auth, async (req, res) => {
-  try {
-    const result = await Chat.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
-    if (!result) return res.status(404).json({ msg: "Chat not found" });
-    res.json({ msg: "Chat deleted" });
-  } catch (error) {
-    res.status(500).json({ error: "Server Error" });
-  }
-});
-
-module.exports = router;
-
-
-//reddis
 // const { v4: uuidv4 } = require('uuid');
 // const express = require('express');
 // const router = express.Router();
 // const Chat = require('../models/Chat');
 // const auth = require('../middleware/authMiddleware');
-// const { HumanMessage } = require('@langchain/core/messages');
+// const { HumanMessage, AIMessage } = require('@langchain/core/messages');
 // const { triageGraph } = require('../triage/graph'); 
 // const { logTransaction } = require('../utils/logger'); 
 
-// // --- 1. FETCH HISTORY (Unchanged) ---
+// // --- 1. FETCH HISTORY ---
 // router.get('/history', auth, async (req, res) => {
 //   try {
 //     const chats = await Chat.find({ userId: req.user.id }).sort({ updatedAt: -1 });
@@ -756,7 +608,7 @@ module.exports = router;
 //   }
 // });
 
-// // --- 2. FETCH SINGLE CHAT (Unchanged) ---
+// // --- 2. FETCH SINGLE CHAT ---
 // router.get('/:id', auth, async (req, res) => {
 //   try {
 //     const chat = await Chat.findOne({ _id: req.params.id, userId: req.user.id });
@@ -767,64 +619,68 @@ module.exports = router;
 //   }
 // });
 
-// // --- 3. SMART SEND ROUTE (REDIS ENABLED) ---
+// // --- 3. SMART SEND ROUTE (SECURE) ---
 // router.post('/send', auth, async (req, res) => {
 //   const start = Date.now();
 //   const userId = req.user.id; 
 //   const { prompt, chatId } = req.body; 
 
+//   // Generate Transaction ID
 //   const transactionId = uuidv4();
+
+//   // 🔒 Log securely (Hide raw input to prevent PII leak in console)
 //   console.log(`📨 [${transactionId}] REQ: (Processing Input...)`);
 
 //   try {
-//     // A. Retrieve or Create Chat (For UI History only)
+//     // A. Retrieve or Create Chat
 //     let chatRecord;
-    
-//     // If chatId is passed, use it. If not, create new.
-//     // This chatId will ALSO serve as our Redis "thread_id"
-//     if (chatId) {
-//         chatRecord = await Chat.findOne({ _id: chatId, userId });
-//     }
-    
-//     if (!chatRecord) {
-//         // New conversation
-//         chatRecord = new Chat({ userId, messages: [] });
-//         await chatRecord.save(); // Save immediately to get the _id
-//     }
+//     if (chatId) chatRecord = await Chat.findOne({ _id: chatId, userId });
+//     if (!chatRecord) chatRecord = new Chat({ userId, messages: [] });
 
-//     const currentChatId = chatRecord._id.toString();
+//     // B. Short-Term Memory Slice (Context Window)
+//     const MEMORY_WINDOW = 10;
+//     const recentMessages = chatRecord.messages.slice(-MEMORY_WINDOW);
+    
+//     // Convert DB messages to LangChain format
+//     const history = recentMessages.map(m => 
+//       m.role === "user" ? new HumanMessage(m.parts[0].text) : new AIMessage(m.parts[0].text)
+//     );
+    
+//     // Add current raw prompt to the inputs for the Graph
+//     const inputMessages = [...history, new HumanMessage(prompt)];
 
-//     // B. PREPARE CONFIG FOR REDIS
-//     // We do NOT need to fetch 'recentMessages' anymore. Redis has them.
-//     const config = {
-//         configurable: { 
-//             thread_id: currentChatId, // 🔑 This connects the user to their saved state in Redis
-//             user_language: chatRecord.user_language || "english"
-//         }
+//     const startState = {
+//       messages: inputMessages,
+//       symptom: chatRecord.symptom || null,
+//       severity: chatRecord.severity || null,
+//       duration: chatRecord.duration || null,
+//       location: chatRecord.location || null,
+//       mode: chatRecord.mode || "intake",
+//       transactionId: transactionId,
+//       user_language: chatRecord.user_language || "english" // Persist language if saved
 //     };
 
-//     // C. RUN THE GRAPH
-//     // We only send the NEW message. Redis appends it to history automatically.
-//     const finalState = await triageGraph.invoke(
-//         { messages: [new HumanMessage(prompt)] }, 
-//         config
-//     );
+//     // C. RUN THE GRAPH (Guardrails & Agents)
+//     const finalState = await triageGraph.invoke(startState);
 
-//     // --- 🚨 SECURITY & LOGGING ---
+//     // --- 🚨 SECURITY FIX START 🚨 ---
+//     // Instead of saving the raw 'prompt', we extract the processed text from the Graph.
+//     // The Guardrail Node has likely updated the HumanMessage to replace PII.
+    
+//     const botResponseText = finalState.messages[finalState.messages.length - 1].content;
+    
+//     // Find the most recent Human Message in the final state
 //     const allMessages = finalState.messages;
-    
-//     // 1. Get Bot Response
-//     const botResponseText = allMessages[allMessages.length - 1].content;
-    
-//     // 2. Get Scrubbed User Input (Find the last Human Message the graph actually processed)
 //     const lastHumanMessage = allMessages.slice().reverse().find(m => m._getType() === "human");
+    
+//     // If the Guardrail scrubbed it, this will be "[PHONE_REDACTED]".
 //     const scrubbedPrompt = lastHumanMessage ? lastHumanMessage.content : prompt;
+//     // --- 🚨 SECURITY FIX END 🚨 ---
 
-//     // D. SYNC TO MONGODB (For History Tab)
-//     // Even though Redis remembers state, we save text to Mongo so the user can see it later in the UI.
+//     // D. SAVE TO DATABASE (Using Clean Data)
 //     chatRecord.messages.push({ 
 //         role: "user", 
-//         parts: [{ text: scrubbedPrompt }], 
+//         parts: [{ text: scrubbedPrompt }], // ✅ Saved as Safe Text
 //         transactionId: transactionId 
 //     });
     
@@ -834,32 +690,39 @@ module.exports = router;
 //         transactionId: transactionId 
 //     });
     
-//     // Sync Metadata (So Mongo reflects the Graph's internal state)
+//     // Update State Fields
 //     chatRecord.symptom = finalState.symptom;
 //     chatRecord.severity = finalState.severity;
 //     chatRecord.duration = finalState.duration;
 //     chatRecord.location = finalState.location;
 //     chatRecord.mode = finalState.mode;
     
+//     // Optional: Save detected language if you added it to schema
 //     if (finalState.user_language) chatRecord.user_language = finalState.user_language; 
 
 //     await chatRecord.save();
 
-//     // E. LOG TRANSACTION
+//     // E. LOG TRANSACTION (Using Clean Data)
 //     logTransaction(
-//         transactionId, "FINAL_RESPONSE", userId, 
-//         { prompt: scrubbedPrompt }, { response: botResponseText }, start
+//         transactionId, 
+//         "FINAL_RESPONSE", 
+//         userId, 
+//         { prompt: scrubbedPrompt }, // ✅ Logged as Safe Text
+//         { response: botResponseText }, 
+//         start
 //     );
 
-//     res.json({ answer: botResponseText, chatId: currentChatId });
+//     res.json({ answer: botResponseText, chatId: chatRecord._id });
 
 //   } catch (error) {
 //     console.error(`❌ [${transactionId}] ERROR:`, error);
+//     // Log error but avoid logging raw prompt if possible
+//     logTransaction(transactionId, "API_ERROR", userId, { input: "Error processing input" }, { error: error.message }, start);
 //     res.status(500).json({ error: "Failed to process message" });
 //   }
 // });
 
-// // --- 4. DELETE CHAT (Unchanged) ---
+// // --- 4. DELETE CHAT ---
 // router.delete('/:id', auth, async (req, res) => {
 //   try {
 //     const result = await Chat.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
@@ -871,3 +734,181 @@ module.exports = router;
 // });
 
 // module.exports = router;
+
+
+//reddis
+const { v4: uuidv4 } = require('uuid');
+const express = require('express');
+const router = express.Router();
+const Chat = require('../models/Chat');
+const auth = require('../middleware/authMiddleware');
+// Import all message types needed for reconstruction
+const { HumanMessage, AIMessage, SystemMessage } = require('@langchain/core/messages');
+const { triageGraph } = require('../triage/graph'); 
+const { logTransaction } = require('../utils/logger'); 
+
+// 🔴 REDIS SETUP (Manual Connection)
+// This connects directly to your Docker container without the buggy library
+const Redis = require("ioredis");
+const redis = new Redis("redis://localhost:6379"); 
+
+redis.on("connect", () => console.log("✅ Redis Connected (Manual Mode)"));
+redis.on("error", (err) => console.error("❌ Redis Connection Error:", err));
+
+// --- HELPER: Reconstruct Messages from JSON ---
+// Redis stores text strings. We need to turn them back into LangChain Classes 
+// so the Graph understands them (e.g., who said what).
+function reconstructMessages(jsonMessages) {
+    if (!jsonMessages) return [];
+    return jsonMessages.map(m => {
+        // Extract content and type safely
+        const content = m.kwargs ? m.kwargs.content : m.content; 
+        const type = m.id ? m.id[m.id.length - 1] : (m.type || "unknown");
+
+        if (type === "HumanMessage" || m.role === "user") return new HumanMessage(content);
+        if (type === "AIMessage" || m.role === "assistant" || m.role === "model") return new AIMessage(content);
+        if (type === "SystemMessage") return new SystemMessage(content);
+        
+        // Default fallback
+        return new HumanMessage(content); 
+    });
+}
+
+// --- 1. FETCH HISTORY (Unchanged) ---
+router.get('/history', auth, async (req, res) => {
+  try {
+    const chats = await Chat.find({ userId: req.user.id }).sort({ updatedAt: -1 });
+    res.json(chats);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch history" });
+  }
+});
+
+// --- 2. FETCH SINGLE CHAT (Unchanged) ---
+router.get('/:id', auth, async (req, res) => {
+  try {
+    const chat = await Chat.findOne({ _id: req.params.id, userId: req.user.id });
+    if (!chat) return res.status(404).json({ msg: "Chat not found" });
+    res.json(chat);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch chat" });
+  }
+});
+
+// --- 3. SMART SEND ROUTE (MANUAL REDIS) ---
+router.post('/send', auth, async (req, res) => {
+  const start = Date.now();
+  const userId = req.user.id; 
+  const { prompt, chatId } = req.body; 
+
+  const transactionId = uuidv4();
+  console.log(`📨 [${transactionId}] REQ: (Processing Input...)`);
+
+  try {
+    // A. SETUP MONGODB (For History UI)
+    // We always keep Mongo for the "History Tab" in the frontend
+    let chatRecord;
+    if (chatId) chatRecord = await Chat.findOne({ _id: chatId, userId });
+    if (!chatRecord) {
+        chatRecord = new Chat({ userId, messages: [] });
+        await chatRecord.save();
+    }
+    const currentChatId = chatRecord._id.toString();
+
+    // B. LOAD STATE FROM REDIS 🐘
+    // We manually ask Redis: "Do you have a brain saved for this chat ID?"
+    const redisKey = `chat_state:${currentChatId}`;
+    const rawState = await redis.get(redisKey);
+    
+    // Default empty state for new users
+    let currentState = {
+        messages: [],
+        symptom: null, severity: null, duration: null, location: null,
+        mode: "intake", user_language: "english"
+    };
+
+    // If we found data in Redis, parse it and restore the Message Classes
+    if (rawState) {
+        const parsed = JSON.parse(rawState);
+        currentState = {
+            ...parsed,
+            messages: reconstructMessages(parsed.messages) 
+        };
+    }
+
+    // C. UPDATE STATE WITH NEW INPUT
+    // We add the user's new message to the existing history
+    const inputs = {
+        ...currentState, // Keep old symptoms/severity
+        messages: [...currentState.messages, new HumanMessage(prompt)]
+    };
+
+    // D. RUN GRAPH (Stateless Mode)
+    // We feed the FULL history into the graph. It processes it and returns the result.
+    // Note: Your graph.js must be compiled WITHOUT a checkpointer for this to work.
+    const finalState = await triageGraph.invoke(inputs);
+
+    // E. SAVE STATE TO REDIS 🐘
+    // We verify valid output, then save the NEW state back to Redis for next time.
+    if (finalState && finalState.messages) {
+        await redis.set(redisKey, JSON.stringify(finalState));
+    }
+
+    // --- F. LOGGING & MONGO SYNC (For Frontend UI) ---
+    const allMessages = finalState.messages;
+    
+    // Get Bot Response
+    const botResponseText = allMessages[allMessages.length - 1].content;
+    
+    // Get Scrubbed User Input (Find the last Human Message the graph processed)
+    const lastHumanMessage = allMessages.slice().reverse().find(m => m._getType() === "human");
+    const scrubbedPrompt = lastHumanMessage ? lastHumanMessage.content : prompt;
+
+    // Save to Mongo (Visual History)
+    chatRecord.messages.push({ role: "user", parts: [{ text: scrubbedPrompt }], transactionId });
+    chatRecord.messages.push({ role: "model", parts: [{ text: botResponseText }], transactionId });
+    
+    // Save Metadata
+    chatRecord.symptom = finalState.symptom;
+    chatRecord.severity = finalState.severity;
+    chatRecord.duration = finalState.duration;
+    chatRecord.location = finalState.location;
+    chatRecord.mode = finalState.mode;
+    
+    // Save Language Preference
+    if (finalState.user_language) chatRecord.user_language = finalState.user_language;
+
+    await chatRecord.save();
+
+    // Log to Console/File
+    logTransaction(
+        transactionId, "FINAL_RESPONSE", userId, 
+        { prompt: scrubbedPrompt }, { response: botResponseText }, start
+    );
+
+    res.json({ answer: botResponseText, chatId: currentChatId });
+
+  } catch (error) {
+    console.error(`❌ [${transactionId}] ERROR:`, error);
+    res.status(500).json({ error: "Failed to process message" });
+  }
+});
+
+// --- 4. DELETE CHAT (Manual Redis Cleanup) ---
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    // Delete from MongoDB
+    const result = await Chat.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
+    if (!result) return res.status(404).json({ msg: "Chat not found" });
+
+    // Delete from Redis (Clean up the brain memory too)
+    const redisKey = `chat_state:${req.params.id}`;
+    await redis.del(redisKey);
+
+    res.json({ msg: "Chat deleted" });
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
+module.exports = router;
