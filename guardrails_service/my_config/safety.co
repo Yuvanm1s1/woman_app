@@ -1,0 +1,15 @@
+define user ask about diagnosis
+  "What medicine should I take"
+  "What medicine should I take for mastitis?"
+  "I have a lump in my breast"
+  "Is it cancer?"
+  "Prescribe me an antibiotic"
+  "My baby has a rash"
+
+define flow check medical safety
+  user ask about diagnosis
+  # Force the variable assignment directly
+  $bot_message = "I am an AI assistant for breastfeeding guidance. I cannot provide medical diagnoses. Please consult a doctor."
+  # We still need to trigger the 'say' event for the system to pick it up
+  bot say $bot_message
+  stop
