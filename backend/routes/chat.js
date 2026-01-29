@@ -855,20 +855,19 @@ router.post('/send', auth, async (req, res) => {
     }
 
     // --- F. LOGGING & MONGO SYNC (For Frontend UI) ---
+    // --- F. LOGGING & MONGO SYNC (For Frontend UI) ---
     const allMessages = finalState.messages;
     
     // Get Bot Response
     const botResponseText = allMessages[allMessages.length - 1].content;
     
-    // Get Scrubbed User Input (Find the last Human Message the graph processed)
-    const lastHumanMessage = allMessages.slice().reverse().find(m => m._getType() === "human");
-    const scrubbedPrompt = lastHumanMessage ? lastHumanMessage.content : prompt;
-
-    // Save to Mongo (Visual History)
-    chatRecord.messages.push({ role: "user", parts: [{ text: scrubbedPrompt }], transactionId });
+    // 🛑 FIX: Save the ORIGINAL 'prompt' (Hinglish) to the database.
+    // We do NOT use the graph's internal state for the User Message because
+    // the Translator Node might have converted it to English.
+    chatRecord.messages.push({ role: "user", parts: [{ text: prompt }], transactionId });
     chatRecord.messages.push({ role: "model", parts: [{ text: botResponseText }], transactionId });
     
-    // Save Metadata
+    // Save Metadata (Symptoms, etc.)
     chatRecord.symptom = finalState.symptom;
     chatRecord.severity = finalState.severity;
     chatRecord.duration = finalState.duration;
@@ -883,11 +882,10 @@ router.post('/send', auth, async (req, res) => {
     // Log to Console/File
     logTransaction(
         transactionId, "FINAL_RESPONSE", userId, 
-        { prompt: scrubbedPrompt }, { response: botResponseText }, start
+        { prompt: prompt }, { response: botResponseText }, start
     );
 
     res.json({ answer: botResponseText, chatId: currentChatId });
-
   } catch (error) {
     console.error(`❌ [${transactionId}] ERROR:`, error);
     res.status(500).json({ error: "Failed to process message" });

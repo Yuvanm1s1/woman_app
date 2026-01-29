@@ -3212,15 +3212,469 @@
 //reddis
 
 // ... existing imports ...
-const { runBookingAgent } = require("./agents/bookingAgent"); // 👈 ADD THIS
+// const { runBookingAgent } = require("./agents/bookingAgent"); // 👈 ADD THIS
+// const { findDoctors } = require("./searchTools"); 
+// const { StateGraph, END } = require("@langchain/langgraph");
+// const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
+// const { ChatOllama } = require("@langchain/ollama");
+// const { HumanMessage, SystemMessage, AIMessage } = require("@langchain/core/messages");
+// const dotenv = require("dotenv");
+// const { logTransaction } = require("../utils/logger"); 
+// const axios = require('axios'); // Required for Guardrail
+
+// // ✅ IMPORT AGENTS
+// const { runBreastfeedingAgent } = require("./agents/breastfeedingAgent");
+// const { translateInput, translateOutput } = require("./agents/translator");
+
+// dotenv.config();
+
+// // --- 1. MODEL SETUP ---
+// let model;
+// let jsonModel;
+
+// if (process.env.LLM_MODE === "LOCAL") {
+//   console.log("💻 MODE: Local CPU (Direct to Ollama 11434)");
+//   model = new ChatOllama({
+//     model: "llama3", 
+//     temperature: 0, 
+//     baseUrl: "http://localhost:11434",
+//   });
+//   jsonModel = new ChatOllama({
+//     model: "llama3",
+//     temperature: 0,
+//     format: "json", 
+//     baseUrl: "http://localhost:11434",
+//   });
+// } else {
+//   console.log("🌐 MODE: Production (Gemini)");
+//   model = new ChatGoogleGenerativeAI({
+//     model: "gemini-pro", 
+//     temperature: 0,
+//     apiKey: process.env.GEMINI_API_KEY,
+//   });
+//   jsonModel = model; 
+// }
+
+// // --- 2. STATE DEFINITION ---
+// const graphState = {
+//   messages: { value: (x, y) => x.concat(y), default: () => [] },
+//   symptom: { value: (x, y) => y ?? x, default: () => null },
+//   severity: { value: (x, y) => y ?? x, default: () => null },
+//   duration: { value: (x, y) => y ?? x, default: () => null },
+//   location: { value: (x, y) => y ?? x, default: () => null },
+//   intent: { value: (x, y) => y ?? x, default: () => "chat" }, 
+//   topic: { value: (x, y) => y ?? x, default: () => null },
+//   mode: { value: (x, y) => y ?? x, default: () => "intake" },
+//   transactionId: { value: (x, y) => y ?? x, default: () => null },
+//   user_language: { value: (x, y) => y ?? x, default: () => "english" }
+// };
+
+// function getUserId(state) {
+//   // If your Graph doesn't carry userId, return 'anonymous' instead of lying
+//   return state.userId || "anonymous_user";
+// }
+
+// // --- NODE: GUARDRAIL GATEWAY ---
+// async function runGuardrailGateway(state) {
+//     const lastMessage = state.messages[state.messages.length - 1].content;
+//     console.log(`🛡️ GUARDRAIL NODE: Checking -> "${lastMessage.substring(0, 20)}..."`);
+
+//     try {
+//         const response = await axios.post('http://localhost:5001/guardrail', {
+//             message: lastMessage
+//         });
+
+//         const { status, message } = response.data;
+
+//         // 1. IF BLOCKED -> STAY LOCKED
+//         if (status === "blocked") {
+//             console.log("🚫 BLOCKED by Guardrails.");
+//             return { 
+//                 mode: "locked", // Keep it locked
+//                 messages: [new AIMessage(message)] 
+//             };
+//         }
+
+//         // 2. IF SCRUBBED -> UPDATE TEXT + UNLOCK
+//         if (message !== lastMessage) {
+//             console.log(`🧼 PII SCRUBBED: Updating State.`);
+//             return { 
+//                 mode: "intake", // 🔓 UNLOCK THE STATE
+//                 messages: [new HumanMessage(message)] 
+//             };
+//         }
+
+//         // 3. IF SAFE -> JUST UNLOCK
+//         return { mode: "intake" }; // 🔓 UNLOCK THE STATE
+
+//     } catch (error) {
+//         console.error("⚠️ Guardrail skipped (Check Python Port 5001)");
+//         // Fallback: Unlock anyway so the bot works
+//         return { mode: "intake" }; 
+//     }
+// }
+
+// // --- NODE: INPUT TRANSLATOR ---
+// async function runInputTranslation(state) {
+//   if(state.mode === "locked") return {}; 
+
+//   const result = await translateInput(state, jsonModel);
+//   if (result.user_language === "english") {
+//      return { user_language: "english" };
+//   }
+//   return { 
+//     user_language: result.user_language,
+//     messages: [new HumanMessage(result.translated_text)] 
+//   };
+// }
+
+// // --- NODE: OUTPUT TRANSLATOR ---
+// async function runOutputTranslation(state) {
+//   if (!state.user_language || state.user_language === "english") {
+//     return {};
+//   }
+//   const result = await translateOutput(state, model);
+//   return { messages: [new AIMessage(result.output_text)] };
+// }
+
+// // --- NODE: MASTER ROUTER ---
+// async function masterRouter(state) {
+//   const start = Date.now();
+//   const lastMessage = state.messages[state.messages.length - 1].content.toLowerCase();
+//   const txnId = state.transactionId || "ROUTER_AI";
+//   console.log(`🚦 [${txnId}] ROUTER: Analyzing ->`, lastMessage);
+
+//   const strictCrisisKeywords = ["suicide", "kill myself", "want to die", "better off dead", "end my life"];
+//   if (strictCrisisKeywords.some(phrase => lastMessage.includes(phrase))) {
+//     logTransaction(txnId, "ROUTER_SENTINEL", getUserId(state), { text: lastMessage }, { decision: "CRISIS" }, start);
+//     return { intent: "crisis" };
+//   }
+
+//   if (lastMessage.includes("reset") || lastMessage.includes("new chat")) {
+//     return { intent: "reset", symptom: null, location: null, severity: null, duration: null, mode: "intake" };
+//   }
+
+//   if (state.mode === "locked") return { intent: "chat" };
+//   if (state.symptom && state.location && state.severity && state.duration) return { intent: "chat" };
+  
+//   if (state.symptom && (!state.severity || !state.duration || !state.location)) {
+//      return { intent: "triage" };
+//   }
+
+//   const routerPrompt = `
+//     Classify User Input.
+//     INPUT: "${lastMessage}"
+    
+//     RULES:
+//     1. CRISIS: Self-harm, suicide, "want to die" -> "crisis"
+//     2. BOOKING (OVERRIDES TRIAGE): 
+//        - If the user explicitly asks to "book", "schedule", "appointment", "find a doctor", or "see a specialist".
+//        - TRIGGER: User wants to FIND, LOCATE, SEE, CONSULT, or SCHEDULE with a professional or facility.
+//        - INCLUDES: "Find a clinic", "Where is the hospital?", "I need a doctor", "Make an appointment", "See a dentist".
+//        - NOTE: This overrides physical symptoms. 
+//          (e.g., "My head hurts, find a clinic" -> BOOKING, not Triage).
+//        - Example: "I have a headache, book a doctor" -> "booking" (NOT triage).
+//        - Example: "Schedule appointment for leg pain" -> "booking".
+//        - Example: "Schedule booking for leg pain in the nearby hospital" -> "booking".
+//     3. EDUCATION: Breastfeeding, baby food, milk supply -> "education"
+//     4. TRIAGE (PHYSICAL): 
+//        - Any mention of pain, injury, fever, body parts (leg, head, stomach), sickness, or physical symptoms parts WITHOUT asking to book.-> "triage"
+//        - Example: "I have a headache" -> "triage".
+//        - Example: "I have pain in my leg" -> "triage". 
+//     5. SUPPORT (EMOTIONAL): Anxiety, depression, sadness, loneliness, stress (ONLY if no physical pain mentioned) -> "support"
+//     6. CHAT (ADVICE): Asking for lists/activities ("What can I do?") -> "chat"
+   
+//     OUTPUT JSON: { "intent": "..." }
+//   `;
+//   try {
+//     const result = await jsonModel.invoke([new HumanMessage(routerPrompt)]);
+//     const parsed = JSON.parse(result.content);
+//     const normalizedIntent = parsed.intent ? parsed.intent.toLowerCase() : "chat";
+//     logTransaction(txnId, "ROUTER_AI", getUserId(state), { input: lastMessage }, parsed, start);
+//     return { intent: normalizedIntent, topic: parsed.topic };
+//   } catch (e) {
+//     return { intent: "chat" };
+//   }
+// }
+
+// // --- NODE: CRISIS HANDLER ---
+// async function handleCrisis(state) {
+//   const start = Date.now();
+//   const txnId = state.transactionId || "CRISIS_NODE";
+//   console.log("🚨 ACTIVATING SAFETY PROTOCOL");
+//   const safetyMessage = `**⚠️ YOU ARE IMPORTANT.**\nCall 9152987821 (Suicide Prevention) or 112 (Emergency).`;
+//   logTransaction(txnId, "CRISIS_NODE", getUserId(state), { status: "active" }, { response: "safety_card_shown" }, start);
+//   return { messages: [new SystemMessage(safetyMessage)], mode: "locked" };
+// }
+
+
+// // --- NODE: MEDICAL EXTRACTOR ---
+// // --- NODE: MEDICAL EXTRACTOR ---
+// async function extractMedicalData(state) {
+//   const start = Date.now();
+//   const lastMessage = state.messages[state.messages.length - 1].content;
+//   const txnId = state.transactionId || "EXTRACTOR";
+//   console.log("🕵️‍♂️ EXTRACTING DATA...");
+
+//   // 1. IMPROVED PROMPT (Even stricter)
+//   const prompt = `
+//     ANALYSIS TASK:
+//     The user just said: "${lastMessage}"
+    
+//     1. EXTRACT these 4 fields if mentioned:
+//        - symptom (e.g., "pain", "fever", "cut", "headache")
+//        - location (e.g., "leg", "head", "stomach", "right arm")
+//        - severity (e.g., "high", "bad", "10/10", "unbearable")
+//        - duration (e.g., "2 days", "since morning", "2 hours", "4 months")
+    
+//     2. RULES:
+//        - Return "null" for fields NOT mentioned.
+//        - DURATION is time (minutes, hours, days, weeks, months, years).
+//        - LOCATION is a body part.
+//        - NEVER put time in location.
+    
+//     Output JSON ONLY: {"symptom": "...", "location": "...", "severity": "...", "duration": "..."}
+//   `;
+
+//   try {
+//     const res = await jsonModel.invoke([new HumanMessage(prompt)]);
+//     const data = JSON.parse(res.content);
+//     logTransaction(txnId, "EXTRACTOR", getUserId(state), { text: lastMessage }, data, start);
+
+//     // 🔴 THE LOGIC FIX: THE SWAP 🔴
+//     // If the AI wrongly puts time into 'location', we force-move it to 'duration'.
+//     if (data.location) {
+//         const locLower = data.location.toLowerCase();
+//         const timeKeywords = ["month", "week", "day", "year", "hour", "minute", "since", "ago"];
+        
+//         // Check if ANY time keyword is inside the location string
+//         if (timeKeywords.some(keyword => locLower.includes(keyword))) {
+//             console.log("⚠️ AI Hallucination Detected: Moving Location -> Duration");
+//             data.duration = data.location; // Move to duration
+//             data.location = null;          // Clear location (so we keep the old Redis one)
+//         }
+//     }
+
+//     const clean = (val) => {
+//         if (!val) return undefined;
+//         const s = String(val).toLowerCase().trim();
+//         const blacklist = ["null", "unknown", "n/a", "none"];
+//         if (blacklist.includes(s)) return undefined;
+//         return val; 
+//     };
+
+//     return { 
+//       // The "??" ensures we keep the old valid data if the new data is null/undefined
+//       symptom: clean(data.symptom) ?? state.symptom,
+//       severity: clean(data.severity) ?? state.severity,
+//       duration: clean(data.duration) ?? state.duration,
+//       location: clean(data.location) ?? state.location
+//     };
+//   } catch (e) { return {}; }
+// }
+// function checkTriageCompleteness(state) {
+//   if (!state.symptom) return "ask_symptom";
+//   if (!state.location) return "ask_location";
+//   if (!state.severity) return "ask_severity";
+//   if (!state.duration) return "ask_duration";
+//   return "generate_diagnosis";
+// }
+
+// async function askSymptom() { return { messages: [new SystemMessage("What is your main physical symptom?")] }; }
+// async function askLocation(state) { return { messages: [new SystemMessage(`Where is the ${state.symptom} located?`)] }; }
+// async function askSeverity() { return { messages: [new SystemMessage("On a scale of 1-10, how severe is it?")] }; }
+// async function askDuration() { return { messages: [new SystemMessage("How long have you had it?")] }; }
+
+// // --- NODE: DIAGNOSIS ---
+// async function generateDiagnosis(state) {
+//   const start = Date.now();
+//   const txnId = state.transactionId || "DIAGNOSIS";
+//   console.log("🏥 GENERATING DIAGNOSIS...");
+//   const prompt = `
+//     Patient: Symptom ${state.symptom}, Location ${state.location}, Severity ${state.severity}, Duration ${state.duration}.
+//     1. Provide a Brief Diagnosis (Potential cause).
+//     2. Suggest 3 Home Remedies or OTC relief ONLY.
+//     3. ⛔ CRITICAL: DO NOT suggest specific prescription names or dosages.
+//     4. End with "SPECIALIST_TYPE: <Type>"
+//   `;
+//   try {
+//     const res = await model.invoke([new HumanMessage(prompt)]);
+//     let text = res.content;
+//     let specialist = "General Physician";
+//     const match = text.match(/SPECIALIST_TYPE:\s*(.*)/i);
+//     if (match && match[1]) specialist = match[1].trim();
+//     text = text.replace(/SPECIALIST_TYPE:.*$/i, "").trim();
+//     const places = await findDoctors(specialist, "Chennai");
+//     logTransaction(txnId, "DIAGNOSIS", getUserId(state), { chart: state }, { specialist, response_len: text.length }, start);
+//     return { messages: [new SystemMessage(`${text}\n\n----------------\n📍 **Recommended Specialists:**\n${places}`)], mode: "locked" };
+//   } catch (err) { return { messages: [new SystemMessage("Diagnosis timed out. Try again.")] }; }
+// }
+
+// // --- NODE: SUPPORT ---
+// async function provideSupport(state) {
+//   const start = Date.now();
+//   const txnId = state.transactionId || "SUPPORT_AI";
+//   console.log("❤️ SUPPORT MODE");
+//   const lastMessage = state.messages[state.messages.length - 1].content;
+//   const prompt = `
+//     INPUT: "${lastMessage}"
+//     ROLE: You are a warm, caring friend.
+    
+//     TASK: Write a comforting response.
+    
+//     STRUCTURE (Do not label 1, 2, 3):
+//     - Sentence 1: Validate the feeling.
+//     - Sentence 2: Reassure them ("I am here").
+//     - Sentence 3: Suggest a tiny, easy action (Deep breath, drink water, or close eyes).
+
+//     SAFETY: NO advice, NO metaphors, NO "go for a walk". Keep it grounded.
+
+//     NEGATIVE CONSTRAINT: 
+//     Do NOT say "Here are three sentences". 
+//     Do NOT use numbered lists. 
+//     Just write the paragraph.
+//   `;
+//   const res = await model.invoke([new HumanMessage(prompt)]);
+//   logTransaction(txnId, "SUPPORT_AI", getUserId(state), { topic: state.topic }, { response_len: res.content.length }, start);
+//   return { messages: [res], mode: "locked" };
+// }
+
+// // --- NODE: CHAT ---
+// async function handleChat(state) {
+//   const start = Date.now();
+//   const txnId = state.transactionId || "CHAT_BOT";
+//   console.log("💬 CHAT MODE");
+//   const lastMessage = state.messages[state.messages.length - 1].content;
+//   const recentHistory = state.messages.slice(-5).map(m => `${m.constructor.name === "HumanMessage" ? "User" : "AI"}: ${m.content}`).join("\n");
+//   const prompt = `
+//     CONTEXT: Medical Chart: ${state.symptom ? `${state.symptom} in ${state.location}` : state.topic} | Severity: ${state.severity || "N/A"}
+//     CHAT HISTORY: ${recentHistory}
+//     CURRENT QUESTION: "${lastMessage}"
+//     INSTRUCTIONS: 1. Answer using Context. 2. Refuse medications.
+//   `;
+//   const res = await model.invoke([new HumanMessage(prompt)]);
+//   logTransaction(txnId, "CHAT_BOT", getUserId(state), { question: lastMessage }, { response: res.content }, start);
+//   return { messages: [res] };
+// }
+
+// // --- NODE: BREASTFEEDING WRAPPER ---
+// async function callBreastfeedingAgent(state) {
+//   return await runBreastfeedingAgent(state, model);
+// }
+// // --- NODE: BOOKING WRAPPER ---
+// async function callBookingAgent(state) {
+//      return await runBookingAgent(state, jsonModel); // Use jsonModel for better extraction
+//   }
+// // --- 3. GRAPH CONSTRUCTION ---
+// const workflow = new StateGraph({ channels: graphState })
+//   .addNode("guardrail_gateway", runGuardrailGateway)
+//   .addNode("input_translator", runInputTranslation)
+//   .addNode("router", masterRouter)
+//   .addNode("extract_medical", extractMedicalData)
+//   .addNode("ask_symptom", askSymptom)
+//   .addNode("ask_location", askLocation)
+//   .addNode("ask_severity", askSeverity)
+//   .addNode("ask_duration", askDuration)
+//   .addNode("diagnosis", generateDiagnosis)
+//   .addNode("support", provideSupport)
+//   .addNode("chat", handleChat)
+//   .addNode("crisis", handleCrisis)
+//   .addNode("breastfeeding", callBreastfeedingAgent)
+//   .addNode("output_translator", runOutputTranslation)
+//   .addNode("booking", callBookingAgent)
+
+//   // ENTRY POINT
+//   .setEntryPoint("guardrail_gateway")
+
+//   // EDGES
+//   .addConditionalEdges(
+//     "guardrail_gateway", 
+//     (state) => (state.mode === "locked" ? "end" : "continue"),
+//     { end: END, continue: "input_translator" }
+//   )
+
+//   .addEdge("input_translator", "router")
+
+//   .addConditionalEdges("router", (state) => state.intent, {
+//     triage: "extract_medical", 
+//     support: "support", 
+//     chat: "chat", 
+//     crisis: "crisis", 
+//     education: "breastfeeding",
+//     booking: "booking", 
+//     reset: END
+//   })
+  
+//   .addConditionalEdges("extract_medical", checkTriageCompleteness, {
+//     ask_symptom: "ask_symptom", 
+//     ask_location: "ask_location", 
+//     ask_severity: "ask_severity", 
+//     ask_duration: "ask_duration", 
+//     generate_diagnosis: "diagnosis"
+//   })
+
+//   .addEdge("ask_symptom", "output_translator")
+//   .addEdge("ask_location", "output_translator")
+//   .addEdge("ask_severity", "output_translator")
+//   .addEdge("ask_duration", "output_translator")
+//   .addEdge("diagnosis", "output_translator")
+//   .addEdge("support", "output_translator")
+//   .addEdge("chat", "output_translator")
+//   .addEdge("crisis", "output_translator")
+//   .addEdge("breastfeeding", "output_translator")
+//   .addEdge("booking", "output_translator")
+  
+//   .addEdge("output_translator", END);
+
+// const triageGraph = workflow.compile(); 
+
+// module.exports = { triageGraph };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//latency improvement 
+const { runBookingAgent } = require("./agents/bookingAgent"); 
 const { findDoctors } = require("./searchTools"); 
 const { StateGraph, END } = require("@langchain/langgraph");
-const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
-const { ChatOllama } = require("@langchain/ollama");
+const { ChatOpenAI } = require("@langchain/openai"); // 👈 OpenAI Import
 const { HumanMessage, SystemMessage, AIMessage } = require("@langchain/core/messages");
 const dotenv = require("dotenv");
 const { logTransaction } = require("../utils/logger"); 
-const axios = require('axios'); // Required for Guardrail
+const axios = require('axios'); 
 
 // ✅ IMPORT AGENTS
 const { runBreastfeedingAgent } = require("./agents/breastfeedingAgent");
@@ -3228,33 +3682,44 @@ const { translateInput, translateOutput } = require("./agents/translator");
 
 dotenv.config();
 
-// --- 1. MODEL SETUP ---
-let model;
-let jsonModel;
+// --- 1. LLM BROKER SETUP (Enterprise Architecture) ---
+// --- 1. LLM BROKER SETUP (Enterprise Architecture) ---
+console.log("🧠 LOADING LLM BROKER: OpenAI Mode");
 
-if (process.env.LLM_MODE === "LOCAL") {
-  console.log("💻 MODE: Local CPU (Direct to Ollama 11434)");
-  model = new ChatOllama({
-    model: "llama3", 
-    temperature: 0, 
-    baseUrl: "http://localhost:11434",
-  });
-  jsonModel = new ChatOllama({
-    model: "llama3",
-    temperature: 0,
-    format: "json", 
-    baseUrl: "http://localhost:11434",
-  });
-} else {
-  console.log("🌐 MODE: Production (Gemini)");
-  model = new ChatGoogleGenerativeAI({
-    model: "gemini-pro", 
-    temperature: 0,
-    apiKey: process.env.GEMINI_API_KEY,
-  });
-  jsonModel = model; 
-}
+// 🧠 THE GENIUS (GPT-4o) - Standard Mode
+// Use for: Diagnosis, Conversation, Education
+const smartModel = new ChatOpenAI({
+  modelName: "gpt-4o", 
+  temperature: 0,
+  apiKey: process.env.OPENAI_API_KEY
+});
 
+// 🧠 THE GENIUS (GPT-4o) - JSON Mode 🧱
+// Use for: Medical Extraction, Booking (Strict Data)
+// We bake the JSON requirement directly into the config
+const jsonModel = new ChatOpenAI({
+  modelName: "gpt-4o", 
+  temperature: 0,
+  apiKey: process.env.OPENAI_API_KEY,
+  modelKwargs: { response_format: { type: "json_object" } } // <--- THE FIX
+});
+
+// ⚡ THE FLASH (GPT-4o-mini) - Standard Mode
+// Use for: Support, Chat, Translation
+const fastModel = new ChatOpenAI({
+  modelName: "gpt-4o-mini", 
+  temperature: 0.7, 
+  apiKey: process.env.OPENAI_API_KEY
+});
+
+// ⚡ THE FLASH (GPT-4o-mini) - JSON Mode 🧱
+// Use for: Routing (Strict Speed)
+const fastJsonModel = new ChatOpenAI({
+    modelName: "gpt-4o-mini",
+    temperature: 0,
+    apiKey: process.env.OPENAI_API_KEY,
+    modelKwargs: { response_format: { type: "json_object" } } // <--- THE FIX
+});
 // --- 2. STATE DEFINITION ---
 const graphState = {
   messages: { value: (x, y) => x.concat(y), default: () => [] },
@@ -3270,7 +3735,6 @@ const graphState = {
 };
 
 function getUserId(state) {
-  // If your Graph doesn't carry userId, return 'anonymous' instead of lying
   return state.userId || "anonymous_user";
 }
 
@@ -3290,7 +3754,7 @@ async function runGuardrailGateway(state) {
         if (status === "blocked") {
             console.log("🚫 BLOCKED by Guardrails.");
             return { 
-                mode: "locked", // Keep it locked
+                mode: "locked", 
                 messages: [new AIMessage(message)] 
             };
         }
@@ -3299,26 +3763,26 @@ async function runGuardrailGateway(state) {
         if (message !== lastMessage) {
             console.log(`🧼 PII SCRUBBED: Updating State.`);
             return { 
-                mode: "intake", // 🔓 UNLOCK THE STATE
+                mode: "intake", 
                 messages: [new HumanMessage(message)] 
             };
         }
 
         // 3. IF SAFE -> JUST UNLOCK
-        return { mode: "intake" }; // 🔓 UNLOCK THE STATE
+        return { mode: "intake" }; 
 
     } catch (error) {
         console.error("⚠️ Guardrail skipped (Check Python Port 5001)");
-        // Fallback: Unlock anyway so the bot works
         return { mode: "intake" }; 
     }
 }
 
-// --- NODE: INPUT TRANSLATOR ---
+// --- NODE: INPUT TRANSLATOR (Uses Flash ⚡) ---
 async function runInputTranslation(state) {
   if(state.mode === "locked") return {}; 
 
-  const result = await translateInput(state, jsonModel);
+  // Use fastJsonModel for speed
+  const result = await translateInput(state, fastJsonModel);
   if (result.user_language === "english") {
      return { user_language: "english" };
   }
@@ -3328,16 +3792,17 @@ async function runInputTranslation(state) {
   };
 }
 
-// --- NODE: OUTPUT TRANSLATOR ---
+// --- NODE: OUTPUT TRANSLATOR (Uses Flash ⚡) ---
 async function runOutputTranslation(state) {
   if (!state.user_language || state.user_language === "english") {
     return {};
   }
-  const result = await translateOutput(state, model);
+  // Use fastModel for speed
+  const result = await translateOutput(state, fastModel);
   return { messages: [new AIMessage(result.output_text)] };
 }
 
-// --- NODE: MASTER ROUTER ---
+// --- NODE: MASTER ROUTER (Uses Flash ⚡) ---
 async function masterRouter(state) {
   const start = Date.now();
   const lastMessage = state.messages[state.messages.length - 1].content.toLowerCase();
@@ -3368,26 +3833,20 @@ async function masterRouter(state) {
     RULES:
     1. CRISIS: Self-harm, suicide, "want to die" -> "crisis"
     2. BOOKING (OVERRIDES TRIAGE): 
-       - If the user explicitly asks to "book", "schedule", "appointment", "find a doctor", or "see a specialist".
-       - TRIGGER: User wants to FIND, LOCATE, SEE, CONSULT, or SCHEDULE with a professional or facility.
-       - INCLUDES: "Find a clinic", "Where is the hospital?", "I need a doctor", "Make an appointment", "See a dentist".
-       - NOTE: This overrides physical symptoms. 
-         (e.g., "My head hurts, find a clinic" -> BOOKING, not Triage).
-       - Example: "I have a headache, book a doctor" -> "booking" (NOT triage).
-       - Example: "Schedule appointment for leg pain" -> "booking".
-       - Example: "Schedule booking for leg pain in the nearby hospital" -> "booking".
+       - User wants to FIND, LOCATE, SEE, CONSULT, or SCHEDULE with a professional.
+       - INCLUDES: "Find a clinic", "Where is the hospital?", "I need a doctor", "Make an appointment".
+       - Example: "I have a headache, book a doctor" -> "booking".
     3. EDUCATION: Breastfeeding, baby food, milk supply -> "education"
     4. TRIAGE (PHYSICAL): 
-       - Any mention of pain, injury, fever, body parts (leg, head, stomach), sickness, or physical symptoms parts WITHOUT asking to book.-> "triage"
-       - Example: "I have a headache" -> "triage".
-       - Example: "I have pain in my leg" -> "triage". 
-    5. SUPPORT (EMOTIONAL): Anxiety, depression, sadness, loneliness, stress (ONLY if no physical pain mentioned) -> "support"
-    6. CHAT (ADVICE): Asking for lists/activities ("What can I do?") -> "chat"
+       - Any mention of pain, injury, fever, body parts, sickness WITHOUT asking to book -> "triage"
+    5. SUPPORT (EMOTIONAL): Anxiety, depression, sadness, loneliness -> "support"
+    6. CHAT (ADVICE): General questions, lists, activities -> "chat"
    
     OUTPUT JSON: { "intent": "..." }
   `;
   try {
-    const result = await jsonModel.invoke([new HumanMessage(routerPrompt)]);
+    // ✅ Use fastJsonModel for routing speed
+    const result = await fastJsonModel.invoke([new HumanMessage(routerPrompt)]);
     const parsed = JSON.parse(result.content);
     const normalizedIntent = parsed.intent ? parsed.intent.toLowerCase() : "chat";
     logTransaction(txnId, "ROUTER_AI", getUserId(state), { input: lastMessage }, parsed, start);
@@ -3408,15 +3867,13 @@ async function handleCrisis(state) {
 }
 
 
-// --- NODE: MEDICAL EXTRACTOR ---
-// --- NODE: MEDICAL EXTRACTOR ---
+// --- NODE: MEDICAL EXTRACTOR (Uses Genius 🧠) ---
 async function extractMedicalData(state) {
   const start = Date.now();
   const lastMessage = state.messages[state.messages.length - 1].content;
   const txnId = state.transactionId || "EXTRACTOR";
   console.log("🕵️‍♂️ EXTRACTING DATA...");
 
-  // 1. IMPROVED PROMPT (Even stricter)
   const prompt = `
     ANALYSIS TASK:
     The user just said: "${lastMessage}"
@@ -3437,21 +3894,20 @@ async function extractMedicalData(state) {
   `;
 
   try {
+    // ✅ Use jsonModel (GPT-4o) for maximum extraction accuracy
     const res = await jsonModel.invoke([new HumanMessage(prompt)]);
     const data = JSON.parse(res.content);
     logTransaction(txnId, "EXTRACTOR", getUserId(state), { text: lastMessage }, data, start);
 
     // 🔴 THE LOGIC FIX: THE SWAP 🔴
-    // If the AI wrongly puts time into 'location', we force-move it to 'duration'.
     if (data.location) {
         const locLower = data.location.toLowerCase();
         const timeKeywords = ["month", "week", "day", "year", "hour", "minute", "since", "ago"];
         
-        // Check if ANY time keyword is inside the location string
         if (timeKeywords.some(keyword => locLower.includes(keyword))) {
             console.log("⚠️ AI Hallucination Detected: Moving Location -> Duration");
-            data.duration = data.location; // Move to duration
-            data.location = null;          // Clear location (so we keep the old Redis one)
+            data.duration = data.location; 
+            data.location = null;          
         }
     }
 
@@ -3464,7 +3920,6 @@ async function extractMedicalData(state) {
     };
 
     return { 
-      // The "??" ensures we keep the old valid data if the new data is null/undefined
       symptom: clean(data.symptom) ?? state.symptom,
       severity: clean(data.severity) ?? state.severity,
       duration: clean(data.duration) ?? state.duration,
@@ -3472,6 +3927,7 @@ async function extractMedicalData(state) {
     };
   } catch (e) { return {}; }
 }
+
 function checkTriageCompleteness(state) {
   if (!state.symptom) return "ask_symptom";
   if (!state.location) return "ask_location";
@@ -3485,7 +3941,7 @@ async function askLocation(state) { return { messages: [new SystemMessage(`Where
 async function askSeverity() { return { messages: [new SystemMessage("On a scale of 1-10, how severe is it?")] }; }
 async function askDuration() { return { messages: [new SystemMessage("How long have you had it?")] }; }
 
-// --- NODE: DIAGNOSIS ---
+// --- NODE: DIAGNOSIS (Uses Genius 🧠) ---
 async function generateDiagnosis(state) {
   const start = Date.now();
   const txnId = state.transactionId || "DIAGNOSIS";
@@ -3498,48 +3954,87 @@ async function generateDiagnosis(state) {
     4. End with "SPECIALIST_TYPE: <Type>"
   `;
   try {
-    const res = await model.invoke([new HumanMessage(prompt)]);
+    // ✅ Use smartModel (GPT-4o) for high-quality medical advice
+    const res = await smartModel.invoke([new HumanMessage(prompt)]);
     let text = res.content;
     let specialist = "General Physician";
     const match = text.match(/SPECIALIST_TYPE:\s*(.*)/i);
     if (match && match[1]) specialist = match[1].trim();
     text = text.replace(/SPECIALIST_TYPE:.*$/i, "").trim();
+    
+    // Perform Tool Search
     const places = await findDoctors(specialist, "Chennai");
+    
     logTransaction(txnId, "DIAGNOSIS", getUserId(state), { chart: state }, { specialist, response_len: text.length }, start);
     return { messages: [new SystemMessage(`${text}\n\n----------------\n📍 **Recommended Specialists:**\n${places}`)], mode: "locked" };
   } catch (err) { return { messages: [new SystemMessage("Diagnosis timed out. Try again.")] }; }
 }
 
-// --- NODE: SUPPORT ---
+// --- NODE: SUPPORT (Uses Flash ⚡) ---
+// async function provideSupport(state) {
+//   const start = Date.now();
+//   const txnId = state.transactionId || "SUPPORT_AI";
+//   console.log("❤️ SUPPORT MODE");
+//   const lastMessage = state.messages[state.messages.length - 1].content;
+//   const prompt = `
+//     INPUT: "${lastMessage}"
+//     ROLE: You are a warm, caring friend.
+    
+//     TASK: Write a comforting response.
+    
+//     STRUCTURE:
+//     - Sentence 1: Validate the feeling.
+//     - Sentence 2: Reassure them ("I am here").
+//     - Sentence 3: Suggest a tiny, easy action (Deep breath, drink water, or close eyes).
+
+//     SAFETY: NO advice, NO metaphors, NO "go for a walk". Keep it grounded.
+//   `;
+//   // ✅ Use fastModel (GPT-4o-mini) for instant empathy
+//   const res = await fastModel.invoke([new HumanMessage(prompt)]);
+//   logTransaction(txnId, "SUPPORT_AI", getUserId(state), { topic: state.topic }, { response_len: res.content.length }, start);
+//   return { messages: [res], mode: "locked" };
+// }
+
+// --- NODE: SUPPORT (Now Context-Aware) ---
 async function provideSupport(state) {
   const start = Date.now();
   const txnId = state.transactionId || "SUPPORT_AI";
   console.log("❤️ SUPPORT MODE");
+  
   const lastMessage = state.messages[state.messages.length - 1].content;
+  
+  // 1. GET HISTORY (The Fix)
+  // We grab the last 5 messages so the AI knows WHY they are sad
+  const recentHistory = state.messages.slice(-5)
+    .map(m => `${m.constructor.name === "HumanMessage" ? "User" : "AI"}: ${m.content}`)
+    .join("\n");
+
   const prompt = `
-    INPUT: "${lastMessage}"
+    CONTEXT HISTORY:
+    ${recentHistory}
+
+    CURRENT INPUT: "${lastMessage}"
+    
     ROLE: You are a warm, caring friend.
+    TASK: Write a comforting response based on the CONTEXT.
     
-    TASK: Write a comforting response.
-    
-    STRUCTURE (Do not label 1, 2, 3):
-    - Sentence 1: Validate the feeling.
+    STRUCTURE:
+    - Sentence 1: Validate the feeling (mention specifically what they are sad/anxious about if known).
     - Sentence 2: Reassure them ("I am here").
-    - Sentence 3: Suggest a tiny, easy action (Deep breath, drink water, or close eyes).
+    - Sentence 3: Suggest a tiny, easy action.
 
-    SAFETY: NO advice, NO metaphors, NO "go for a walk". Keep it grounded.
-
-    NEGATIVE CONSTRAINT: 
-    Do NOT say "Here are three sentences". 
-    Do NOT use numbered lists. 
-    Just write the paragraph.
+    SAFETY: NO advice, NO metaphors, NO "go for a walk".
   `;
-  const res = await model.invoke([new HumanMessage(prompt)]);
+
+  // ✅ Use fastModel
+  const res = await fastModel.invoke([new HumanMessage(prompt)]);
+  
   logTransaction(txnId, "SUPPORT_AI", getUserId(state), { topic: state.topic }, { response_len: res.content.length }, start);
   return { messages: [res], mode: "locked" };
 }
 
-// --- NODE: CHAT ---
+
+// --- NODE: CHAT (Uses Flash ⚡) ---
 async function handleChat(state) {
   const start = Date.now();
   const txnId = state.transactionId || "CHAT_BOT";
@@ -3552,20 +4047,25 @@ async function handleChat(state) {
     CURRENT QUESTION: "${lastMessage}"
     INSTRUCTIONS: 1. Answer using Context. 2. Refuse medications.
   `;
-  const res = await model.invoke([new HumanMessage(prompt)]);
+  // ✅ Use fastModel (GPT-4o-mini) for fast conversation
+  const res = await fastModel.invoke([new HumanMessage(prompt)]);
   logTransaction(txnId, "CHAT_BOT", getUserId(state), { question: lastMessage }, { response: res.content }, start);
   return { messages: [res] };
 }
 
-// --- NODE: BREASTFEEDING WRAPPER ---
+// --- NODE: BREASTFEEDING WRAPPER (Uses Genius 🧠) ---
 async function callBreastfeedingAgent(state) {
-  return await runBreastfeedingAgent(state, model);
+  // Use smartModel for medical/educational accuracy
+  return await runBreastfeedingAgent(state, smartModel);
 }
-// --- NODE: BOOKING WRAPPER ---
+
+// --- NODE: BOOKING WRAPPER (Uses Genius 🧠) ---
 async function callBookingAgent(state) {
-     return await runBookingAgent(state, jsonModel); // Use jsonModel for better extraction
-  }
-// --- 3. GRAPH CONSTRUCTION ---
+     // Use jsonModel (GPT-4o) for accurate date/time extraction
+     return await runBookingAgent(state, jsonModel); 
+}
+
+// --- 3. GRAPH CONSTRUCTION (Unchanged) ---
 const workflow = new StateGraph({ channels: graphState })
   .addNode("guardrail_gateway", runGuardrailGateway)
   .addNode("input_translator", runInputTranslation)
@@ -3626,6 +4126,7 @@ const workflow = new StateGraph({ channels: graphState })
   
   .addEdge("output_translator", END);
 
+// COMPILE (Stateless - Route handles memory)
 const triageGraph = workflow.compile(); 
 
 module.exports = { triageGraph };
