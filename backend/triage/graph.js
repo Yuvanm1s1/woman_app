@@ -4056,7 +4056,8 @@ async function handleChat(state) {
 // --- NODE: BREASTFEEDING WRAPPER (Uses Genius 🧠) ---
 async function callBreastfeedingAgent(state) {
   // Use smartModel for medical/educational accuracy
-  return await runBreastfeedingAgent(state, smartModel);
+  //return await runBreastfeedingAgent(state, smartModel);
+  return await runBreastfeedingAgent(state, fastModel);
 }
 
 // --- NODE: BOOKING WRAPPER (Uses Genius 🧠) ---

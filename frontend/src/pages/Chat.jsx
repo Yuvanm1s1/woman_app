@@ -890,7 +890,31 @@ export default function Chat() {
   // ---------------------------
 
   const messagesEndRef = useRef(null);
+  useEffect(() => {
+    const wakeUpServer = async () => {
+      try {
+        // We hit the new route we just made in chat.js
+        await axios.get("http://localhost:5000/api/chat/ping");
+        console.log("🔥 Server is awake and ready.");
+      } catch (err) {
+        console.log("⚠️ Server is sleeping or offline.");
+      }
+    };
+    wakeUpServer();
+  }, []);
 
+  // 🤖 AUTO-WELCOME: Bot speaks first!
+  useEffect(() => {
+    // Check if it's a new session (no ID) and empty
+    if (!chatId && messages.length === 0) {
+      setMessages([
+        {
+          role: "model", 
+          parts: [{ text: "Hello! 👋 I am Dr. AI.\n\nI can help with symptoms, finding doctors, or breastfeeding advice.\n\nHow are you feeling today?" }]
+        }
+      ]);
+    }
+  }, [chatId, messages.length]);
   // 1. Fetch History
   const fetchHistory = async () => {
     try {

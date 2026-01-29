@@ -212,6 +212,145 @@
 
 
 
+# import logging
+# import re
+# import os
+# import whisper # <--- LOCAL WHISPER IMPORT
+# from flask import Flask, request, jsonify
+# from flask_cors import CORS
+# from guardrails import Guard
+# from guardrails.validators import FailResult, PassResult, Validator, register_validator
+# from openai import OpenAI
+# from dotenv import load_dotenv
+
+# # Load .env
+# load_dotenv() 
+
+# # Setup Logging
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# logger = logging.getLogger(__name__)
+
+# app = Flask(__name__)
+# CORS(app) # <--- CRITICAL: Allows React to talk to this server
+
+# client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# # ==========================================
+# # ⏳ LOAD MODELS (Runs once on startup)
+# # ==========================================
+# print("⏳ Loading Whisper Model (Base)... This uses your CPU/GPU.")
+# voice_model = whisper.load_model("base")
+# print("✅ Whisper Model Loaded!")
+
+# # Ensure temp folder exists for audio uploads
+# UPLOAD_FOLDER = './temp_audio'
+# if not os.path.exists(UPLOAD_FOLDER):
+#     os.makedirs(UPLOAD_FOLDER)
+
+# # ==========================================
+# # 🎤 1. VOICE TRANSCRIPTION ROUTE (For Frontend)
+# # ==========================================
+# @app.route('/transcribe', methods=['POST'])
+# def transcribe_audio():
+#     print("🎤 [VOICE NODE] Received Audio...")
+    
+#     if 'audio' not in request.files:
+#         return jsonify({'error': 'No audio file provided'}), 400
+
+#     audio_file = request.files['audio']
+#     if audio_file.filename == '':
+#         return jsonify({'error': 'No selected file'}), 400
+
+#     # Save file temporarily
+#     file_path = os.path.join(UPLOAD_FOLDER, "input.wav")
+#     audio_file.save(file_path)
+
+#     try:
+#         # Run Local Whisper
+#         result = voice_model.transcribe(file_path)
+#         text = result['text']
+#         print(f"✅ Transcribed: {text}")
+#         return jsonify({'text': text})
+
+#     except Exception as e:
+#         print(f"❌ Voice Error: {e}")
+#         return jsonify({'error': str(e)}), 500
+
+# # ==========================================
+# # 🛡️ 2. GUARDRAIL ROUTE (For Node Backend)
+# # ==========================================
+# @register_validator(name="pii_scrubber", data_type="string")
+# class PIIScrubber(Validator):
+#     def validate(self, value, metadata):
+#         phone_pattern = r'\b(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}\b'
+#         if re.search(phone_pattern, value):
+#             return FailResult(error_message="PII", fix_value="[REDACTED]")
+#         return PassResult()
+
+# @register_validator(name="ai_medical_safety", data_type="string")
+# class AIMedicalSafety(Validator):
+#     def validate(self, value, metadata):
+#         # Judge Logic
+#         system_instruction = """
+#         You are a safety classifier. 
+        
+#         🚨 CRITICAL RULE: The user is answering medical triage questions. 
+#         Contexts like "Pain is 8/10", "It hurts a lot", "Since yesterday" are SAFE.
+
+#         RULES FOR SAFE (ALLOW THESE):
+#         1. "Find a doctor", "Book appointment".
+#         2. Symptoms: "My head hurts", "I feel sad".
+#         3. Triage Answers: "4/10", "Severity is 8", "High pain", "2 days ago". <--- ✅ NEW FIX
+#         4. Hinglish: "Mere daant mein dard hai".
+        
+#         RULES FOR UNSAFE (BLOCK THESE):
+#         1. Asking for specific PRESCRIPTIONS: "Can I take Azithromycin?".
+#         2. Asking for DIAGNOSIS: "Do I have cancer?".
+#         3. Self-harm / Suicide methods.
+        
+#         Return ONLY: "SAFE" or "UNSAFE".
+#         """
+#         try:
+#             response = client.chat.completions.create(
+#                 model="gpt-4o-mini",
+#                 messages=[
+#                     {"role": "system", "content": system_instruction},
+#                     {"role": "user", "content": f'CLASSIFY: "{value}"'}
+#                 ],
+#                 temperature=0, max_tokens=5
+#             )
+#             verdict = response.choices[0].message.content.strip().upper()
+#             print(f"⚖️ AI Judge Verdict: {verdict}") 
+
+#             if "UNSAFE" in verdict:
+#                 return FailResult(error_message="Safety Violation", fix_value="I cannot provide diagnosis/drugs.")
+#             return PassResult()
+#         except Exception:
+#             return PassResult()
+
+# guard = Guard().use_many(PIIScrubber(on_fail="fix"), AIMedicalSafety(on_fail="fix"))
+
+# @app.route('/guardrail', methods=['POST'])
+# def run_guardrail():
+#     data = request.json
+#     try:
+#         res = guard.validate(data.get("message", ""))
+#         return jsonify({"status": "allowed", "message": res.validated_output})
+#     except:
+#         return jsonify({"status": "allowed", "message": data.get("message", "")})
+
+# if __name__ == '__main__':
+#     print("🛡️  Dr. AI Brain (Voice + Guardrails) Running on Port 5001")
+#     app.run(port=5001, debug=False)
+
+
+
+
+
+
+
+
+
 import logging
 import re
 import os
@@ -248,7 +387,7 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 # ==========================================
-# 🎤 1. VOICE TRANSCRIPTION ROUTE (For Frontend)
+# 🎤 1. VOICE TRANSCRIPTION ROUTE
 # ==========================================
 @app.route('/transcribe', methods=['POST'])
 def transcribe_audio():
@@ -277,7 +416,7 @@ def transcribe_audio():
         return jsonify({'error': str(e)}), 500
 
 # ==========================================
-# 🛡️ 2. GUARDRAIL ROUTE (For Node Backend)
+# 🛡️ 2. GUARDRAIL ROUTE (UPDATED JUDGE)
 # ==========================================
 @register_validator(name="pii_scrubber", data_type="string")
 class PIIScrubber(Validator):
@@ -290,24 +429,27 @@ class PIIScrubber(Validator):
 @register_validator(name="ai_medical_safety", data_type="string")
 class AIMedicalSafety(Validator):
     def validate(self, value, metadata):
-        # Judge Logic
+        # Judge Logic - UPDATED TO BE PERMISSIVE
         system_instruction = """
         You are a safety classifier. 
         
-        🚨 CRITICAL RULE: The user is answering medical triage questions. 
-        Contexts like "Pain is 8/10", "It hurts a lot", "Since yesterday" are SAFE.
+        🚨 MISSION: ALLOW almost everything except direct requests for prescription drugs or self-harm.
 
-        RULES FOR SAFE (ALLOW THESE):
-        1. "Find a doctor", "Book appointment".
-        2. Symptoms: "My head hurts", "I feel sad".
-        3. Triage Answers: "4/10", "Severity is 8", "High pain", "2 days ago". <--- ✅ NEW FIX
-        4. Hinglish: "Mere daant mein dard hai".
+        ✅ SAFE (ALLOW THESE):
+        ANY QUESTION REGARDING BREASTFEEDING AND PREGNANCY IS ALWAYS SAFE.
+        1. "I have the flu, can I breastfeed?" (General medical question -> SAFE)
+        2. "Baby weight is low" (Symptom description -> SAFE)
+        3. "My leg hurts", "Stomach pain" (Triage -> SAFE)
+        4. "Dolo 650", "Paracetamol" (Over-the-counter mention -> SAFE)
+        5. "4/10", "Severity 8" (Numbers -> SAFE)
+        6. ANY Hinglish: "Mujhe flu hai", "Dard ho raha hai" -> SAFE.
+
+        ❌ UNSAFE (BLOCK THESE ONLY):
+        1. "Can I take Azithromycin?" (Request for SPECIFIC PRESCRIPTION dosage).
+        2. "How to cut my wrist?" (Self-harm).
+        3. "Do I have cancer?" (Request for distinct diagnosis).
         
-        RULES FOR UNSAFE (BLOCK THESE):
-        1. Asking for specific PRESCRIPTIONS: "Can I take Azithromycin?".
-        2. Asking for DIAGNOSIS: "Do I have cancer?".
-        3. Self-harm / Suicide methods.
-        
+        If unsure, classify as "SAFE".
         Return ONLY: "SAFE" or "UNSAFE".
         """
         try:

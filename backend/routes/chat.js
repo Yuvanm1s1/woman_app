@@ -774,6 +774,11 @@ function reconstructMessages(jsonMessages) {
     });
 }
 
+//cold start
+router.get('/ping', (req, res) => {
+    console.log("🔥 Backend Warmed Up!");
+    res.send("pong"); 
+});
 // --- 1. FETCH HISTORY (Unchanged) ---
 router.get('/history', auth, async (req, res) => {
   try {

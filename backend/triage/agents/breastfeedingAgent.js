@@ -168,8 +168,12 @@ const { HumanMessage, SystemMessage } = require("@langchain/core/messages");
 const path = require("path");
 const { logTransaction } = require("../../utils/logger"); 
 
-// Path to the "Library"
 const VECTOR_STORE_PATH = path.join(__dirname, "../../vector_store");
+
+// 🧠 GLOBAL CACHE (The Fix)
+// We store the loaded brain here so we don't read the file 
+// from the hard drive on every single request.
+let cachedVectorStore = null;
 
 async function runBreastfeedingAgent(state, model) {
   const start = Date.now();
@@ -178,48 +182,47 @@ async function runBreastfeedingAgent(state, model) {
   
   console.log(`🤱 [${txnId}] RAG AGENT: Researching -> "${lastMessage}"`);
 
-  // 1. Setup Embeddings 
-  // 🚨 IMPORTANT: This must match the Builder script exactly.
-  // We used the default there, so we use the default here.
+  // 1. Setup Embeddings
   const embeddings = new OpenAIEmbeddings({
       apiKey: process.env.OPENAI_API_KEY
   });
 
   try {
-    // 2. Load the Vector Store
-    const vectorStore = await HNSWLib.load(VECTOR_STORE_PATH, embeddings);
+    // 2. Load Vector Store (WITH CACHING ⚡)
+    if (!cachedVectorStore) {
+        console.log("💿 Loading Index from Disk (First Time Only)...");
+        cachedVectorStore = await HNSWLib.load(VECTOR_STORE_PATH, embeddings);
+    } else {
+        console.log("⚡ Using Cached Index (RAM)");
+    }
 
-    // 3. Retrieve (Search for top 4 paragraphs)
-    const retriever = vectorStore.asRetriever(4);
+    // 3. Retrieve
+    const retriever = cachedVectorStore.asRetriever(4);
     const docs = await retriever.invoke(lastMessage);
     
-    // Safety check for empty results
     if (!docs || docs.length === 0) {
-        console.log("📄 ZERO documents found.");
-        return { messages: [new SystemMessage("I searched my medical database but couldn't find specific info on that.")] };
+        return { messages: [new SystemMessage("I couldn't find specific info in my database.")] };
     }
 
     const context = docs.map(d => d.pageContent).join("\n\n---\n\n");
     console.log(`📄 Found ${docs.length} docs.`);
 
-    // 4. Generate Answer (Using the Smart Model passed from graph.js)
+    // 4. Generate Answer
+    // Added "CONCISE" instruction to stop it from writing essays
     const prompt = `
       You are a specialized Breastfeeding Consultant.
       
       USER QUESTION: "${lastMessage}"
       
-      RETRIEVED GUIDELINES (WHO/CDC):
+      RETRIEVED GUIDELINES:
       ${context}
       
       INSTRUCTIONS:
-      1. Answer the question using the guidelines above.
-      2. INTELLIGENT INFERENCE: If text mentions "respiratory viruses", apply logic to "Covid" or "Flu".
-      3. Only say "I don't know" if the text is completely unrelated.
-      
-      Answer in a warm, helpful tone.
+      1. Answer based ONLY on the guidelines.
+      2. BE CONCISE. Keep answer under 3 sentences if possible.
+      3. Answer in a warm, helpful tone.
     `;
 
-    // Uses GPT-4o (passed as 'model')
     const response = await model.invoke([new HumanMessage(prompt)]);
 
     logTransaction(txnId, "RAG_AGENT", "u1@gmail.com", { query: lastMessage }, { response: response.content }, start);
@@ -228,7 +231,7 @@ async function runBreastfeedingAgent(state, model) {
 
   } catch (error) {
     console.error("❌ RAG Error:", error);
-    return { messages: [new SystemMessage("I couldn't access the specific guidelines, but generally speaking: Please consult a doctor for specific medical advice.")] };
+    return { messages: [new SystemMessage("System Error: Could not access medical guidelines.")] };
   }
 }
 
